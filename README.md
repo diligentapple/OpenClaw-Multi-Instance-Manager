@@ -34,6 +34,12 @@ openclaw-new N
 
 Example: `openclaw-new 3` creates instance #3.
 
+To force pulling the latest image before creating:
+
+```bash
+openclaw-new --pull N
+```
+
 ### Onboarding (required after creating)
 
 ```bash
