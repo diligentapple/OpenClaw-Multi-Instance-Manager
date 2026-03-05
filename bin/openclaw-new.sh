@@ -2,8 +2,9 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: openclaw-new N"
+  echo "Usage: openclaw-new [--pull] N"
   echo "Example: openclaw-new 3"
+  echo "         openclaw-new --pull 3  (pull latest image first)"
 }
 
 need_cmd() {
@@ -36,6 +37,14 @@ render_template() {
     -e "s/{{TZ}}/${TZ}/g" \
     "$tmpl" > "$out"
 }
+
+PULL=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --pull) PULL=true; shift ;;
+    *)      break ;;
+  esac
+done
 
 N="${1:-}"
 if ! is_int "$N"; then usage; exit 1; fi
@@ -83,6 +92,11 @@ fi
 
 render_template "$TEMPLATE" "${INSTANCE_DIR}/docker-compose.yml"
 
+if [[ "$PULL" == true ]]; then
+  echo "Pulling latest OpenClaw image..."
+  docker pull ghcr.io/phioranex/openclaw-docker:latest
+fi
+
 echo "Bringing up instance #$N..."
 $COMPOSE_BIN -f "${INSTANCE_DIR}/docker-compose.yml" up -d
 
@@ -95,8 +109,7 @@ echo "API Port  : $API_PORT"
 echo "WS Port   : $WS_PORT"
 echo ""
 echo "Next: run onboarding"
-echo "  cd ${INSTANCE_DIR}"
-echo "  $COMPOSE_BIN --profile cli run --rm openclaw-cli onboard"
+echo "  openclaw-onboard $N"
 echo ""
 echo "Health:"
 echo "  curl http://127.0.0.1:${API_PORT}/health"
