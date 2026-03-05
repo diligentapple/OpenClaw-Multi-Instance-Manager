@@ -1,6 +1,8 @@
 # OpenClaw Multi-Instance Manager
 
-Manage multiple OpenClaw Docker instances on a single machine with deterministic naming, ports, and data directories.
+Manage multiple [OpenClaw](https://github.com/phioranex/openclaw-docker) Docker instances on a single machine with deterministic naming, ports, and data directories.
+
+This tool wraps the official OpenClaw Docker image (`ghcr.io/phioranex/openclaw-docker:latest`) to make it easy to run multiple isolated instances on a single VPS.
 
 ## Prerequisites
 
@@ -107,6 +109,10 @@ Ports are bound to `0.0.0.0` by default. For production, consider:
 
 - Binding to `127.0.0.1` and using a reverse proxy (nginx, caddy)
 - Configuring firewall rules (`ufw`, `iptables`) to restrict access
+
+## Credits
+
+This project manages instances of the [OpenClaw Docker image](https://github.com/phioranex/openclaw-docker) (`ghcr.io/phioranex/openclaw-docker`) by [@phioranex](https://github.com/phioranex).
 
 ## License
 
