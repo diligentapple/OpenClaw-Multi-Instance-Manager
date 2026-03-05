@@ -105,6 +105,7 @@ Each instance N gets deterministic ports:
 - Instances don't interfere with each other
 - Safe to run many on one VPS
 - Creating an instance with a number that already exists is blocked -- you must delete first
+- `openclaw-new N` without `--pull` uses the locally cached image if one exists; use `openclaw-new --pull N` to ensure you get the latest version
 
 ## Firewall / Reverse Proxy
 
