@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/diligentapple/OpenClaw-Multi-Instan
 
 ## Usage
 
-### Create an instance
+### Step 1: Create an instance
 
 ```bash
 openclaw-new N
@@ -37,18 +37,19 @@ openclaw-new N
 
 Example: `openclaw-new 3` creates instance #3.
 
-**To force pulling the latest OpenClaw image before creating:**
+**(Optional) To force pulling the latest OpenClaw image before creating:**
 
 ```bash
 openclaw-new --pull N
 ```
 
-### Onboarding (required after creating)
+### Step 2: Onboarding (required after creating)
 
 ```bash
 openclaw-onboard N
 ```
 
+## Useful Commands
 ### Health check / logs
 
 ```bash
