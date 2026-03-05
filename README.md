@@ -1,6 +1,6 @@
 # OpenClaw Multi-Instance Manager
 
-Manage multiple [OpenClaw](https://github.com/openclaw/openclaw) Docker instances on a single machine with deterministic naming, ports, and data directories.
+Easily create, manage, delete multiple [OpenClaw](https://github.com/openclaw/openclaw) Docker instances on a single machine with deterministic naming, ports, and data directories.
 
 This tool wraps a community OpenClaw Docker image (`ghcr.io/phioranex/openclaw-docker:latest`) to make it easy to run multiple isolated instances on a single VPS.
 
