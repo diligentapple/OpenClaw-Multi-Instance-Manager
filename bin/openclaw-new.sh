@@ -5,7 +5,7 @@ usage() {
   echo "Usage: openclaw-new [--pull] [--port API_PORT] N"
   echo "Example: openclaw-new 3                          (auto ports: 38789/38790)"
   echo "         openclaw-new --pull 3                   (pull latest image first)"
-  echo "         openclaw-new --port 9000 7              (custom ports: 9000/9001)"
+  echo "         openclaw-new --port 9000 6              (custom ports: 9000/9001)"
 }
 
 need_cmd() {
@@ -78,7 +78,7 @@ if [[ -n "$CUSTOM_PORT" ]]; then
   fi
   API_PORT="$CUSTOM_PORT"
   WS_PORT="$((CUSTOM_PORT + 1))"
-elif [[ "$N" -le 6 ]]; then
+elif [[ "$N" -le 5 ]]; then
   API_PORT="${N}8789"
   WS_PORT="${N}8790"
 else
