@@ -68,6 +68,21 @@ curl http://127.0.0.1:N8789/health
 docker logs -f openclawN-gateway
 ```
 
+### Run commands inside an instance
+
+```bash
+# Open an interactive shell in instance 1
+openclaw-exec 1
+
+# Run a single command in instance 2
+openclaw-exec 2 node --version
+
+# Run any command you would normally run inside the container
+openclaw-exec 3 cat /app/config.json
+```
+
+This is equivalent to `docker exec` but you don't need to remember the container name.
+
 ### Update an instance (pull latest image and recreate)
 
 ```bash
