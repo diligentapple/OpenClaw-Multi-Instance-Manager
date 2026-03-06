@@ -26,6 +26,16 @@ sudo bash install.sh
 curl -fsSL https://raw.githubusercontent.com/diligentapple/OpenClaw-Multi-Instance-Manager/main/bootstrap.sh | sudo bash
 ```
 
+### After installing
+
+The installer adds your user to the `docker` group so you can run commands without `sudo`. For this to take effect, either:
+
+```bash
+newgrp docker   # apply in current shell
+```
+
+or log out and back in.
+
 ## Usage
 
 ### Create an instance
