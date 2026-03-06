@@ -45,6 +45,20 @@ install -m 0755 "${REPO_DIR}/bin/openclaw-exec.sh"    "${BIN_DIR}/openclaw-exec"
 
 install -m 0644 "${REPO_DIR}/templates/docker-compose.yml.tmpl" "${SHARE_DIR}/templates/docker-compose.yml.tmpl"
 
+# Create openclawN shortcut symlinks for existing instances
+USER_HOME="${SUDO_USER:+$(eval echo "~${SUDO_USER}")}"
+USER_HOME="${USER_HOME:-$HOME}"
+for dir in "${USER_HOME}"/openclaw[0-9]*; do
+  [[ -d "$dir" ]] || continue
+  base="$(basename "$dir")"
+  num="${base#openclaw}"
+  [[ "$num" =~ ^[0-9]+$ ]] || continue
+  shortcut="${BIN_DIR}/openclaw${num}"
+  if [[ ! -e "$shortcut" ]]; then
+    ln -s "${BIN_DIR}/openclaw-exec" "$shortcut"
+  fi
+done
+
 echo "Installed openclaw manager scripts."
 echo ""
 if [[ -n "${SUDO_USER:-}" ]] && id -nG "$SUDO_USER" 2>/dev/null | grep -qw docker; then
