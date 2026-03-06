@@ -83,9 +83,11 @@ if port_in_use "$API_PORT" || port_in_use "$WS_PORT"; then
   exit 1
 fi
 
-mkdir -p "$INSTANCE_DIR" "$DATA_DIR/workspace"
-# Container runs as uid 1000 (node). Fix ownership so the process can write.
-chown -R 1000:1000 "$DATA_DIR"
+mkdir -p "$INSTANCE_DIR" "$DATA_DIR"
+# Container runs as uid 1000 (node). Create workspace with correct ownership
+# without requiring sudo on the host.
+docker run --rm -v "${DATA_DIR}:/setup" ghcr.io/phioranex/openclaw-docker:latest \
+  sh -c 'mkdir -p /setup/workspace && chown -R 1000:1000 /setup'
 
 if [[ ! -f "$TEMPLATE" ]]; then
   echo "Template not found: $TEMPLATE"
