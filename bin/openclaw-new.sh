@@ -47,7 +47,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 N="${1:-}"
-if ! is_int "$N"; then usage; exit 1; fi
+if ! is_int "$N" || [[ "$N" -lt 1 || "$N" -gt 6 ]]; then
+  echo "Error: N must be an integer between 1 and 6 (port ${N:-?}8789 would exceed 65535)."
+  usage; exit 1
+fi
 
 need_cmd docker
 need_cmd sed
@@ -86,7 +89,7 @@ fi
 mkdir -p "$INSTANCE_DIR" "$DATA_DIR"
 # Container runs as uid 1000 (node). Create workspace with correct ownership
 # without requiring sudo on the host.
-docker run --rm --entrypoint sh -v "${DATA_DIR}:/setup" ghcr.io/phioranex/openclaw-docker:latest \
+docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/setup" ghcr.io/phioranex/openclaw-docker:latest \
   -c 'mkdir -p /setup/workspace && chown -R 1000:1000 /setup'
 
 if [[ ! -f "$TEMPLATE" ]]; then
