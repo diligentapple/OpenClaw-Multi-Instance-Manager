@@ -45,6 +45,12 @@ install -m 0755 "${REPO_DIR}/bin/openclaw-onboard.sh" "${BIN_DIR}/openclaw-onboa
 install -m 0644 "${REPO_DIR}/templates/docker-compose.yml.tmpl" "${SHARE_DIR}/templates/docker-compose.yml.tmpl"
 
 echo "Installed openclaw manager scripts."
+echo ""
+if [[ -n "${SUDO_USER:-}" ]] && id -nG "$SUDO_USER" 2>/dev/null | grep -qw docker; then
+  echo "NOTE: '$SUDO_USER' was added to the docker group."
+  echo "      You must run 'newgrp docker' or log out and back in before using the commands below."
+  echo ""
+fi
 echo "Commands:"
 echo "  openclaw-new N"
 echo "  openclaw-delete N"
