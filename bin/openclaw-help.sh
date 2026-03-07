@@ -13,8 +13,10 @@ INSTANCE LIFECYCLE
       Options:
         --pull          Pull the latest Docker image before creating
         --port PORT     Use a custom API port (WS port = PORT+1)
+        -o, --onboard   Start onboarding wizard immediately after creation
       Example:
         openclaw-new 3
+        openclaw-new -o 3                   (create + onboard in one step)
         openclaw-new --pull --port 9000 6
 
   openclaw-onboard N

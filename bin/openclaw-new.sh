@@ -2,10 +2,11 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: openclaw-new [--pull] [--port API_PORT] N"
+  echo "Usage: openclaw-new [--pull] [--port API_PORT] [-o] N"
   echo "Example: openclaw-new 3                          (auto ports: 38789/38790)"
   echo "         openclaw-new --pull 3                   (pull latest image first)"
   echo "         openclaw-new --port 9000 6              (custom ports: 9000/9001)"
+  echo "         openclaw-new -o 3                       (create and start onboarding)"
 }
 
 need_cmd() {
@@ -41,10 +42,12 @@ render_template() {
 
 PULL=false
 CUSTOM_PORT=""
+ONBOARD=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pull) PULL=true; shift ;;
     --port) CUSTOM_PORT="${2:-}"; shift 2 ;;
+    -o|--onboard) ONBOARD=true; shift ;;
     *)      break ;;
   esac
 done
@@ -132,7 +135,8 @@ $COMPOSE_BIN -f "${INSTANCE_DIR}/docker-compose.yml" up -d
 EXEC_BIN="$(command -v openclaw-exec 2>/dev/null || echo "/usr/local/bin/openclaw-exec")"
 SHORTCUT="/usr/local/bin/openclaw${N}"
 if [[ ! -e "$SHORTCUT" ]] && [[ -x "$EXEC_BIN" ]]; then
-  ln -s "$EXEC_BIN" "$SHORTCUT" 2>/dev/null || true
+  ln -s "$EXEC_BIN" "$SHORTCUT" 2>/dev/null || \
+    sudo ln -s "$EXEC_BIN" "$SHORTCUT" 2>/dev/null || true
 fi
 
 echo ""
@@ -143,21 +147,16 @@ echo "Data      : $DATA_DIR"
 echo "API Port  : $API_PORT"
 echo "WS Port   : $WS_PORT"
 echo ""
-echo "Next: run onboarding"
-echo "  openclaw-onboard $N"
-echo ""
-echo "Shortcut:"
-echo "  openclaw${N} <command>          (runs command inside the container)"
-echo "  openclaw${N}                    (opens interactive shell)"
-echo ""
-echo "Health:"
-echo "  curl http://127.0.0.1:${API_PORT}/health"
-echo "Logs:"
-echo "  docker logs -f ${CONTAINER}"
-
-# Tailscale hint
+echo "Useful commands:"
+echo "  openclaw-onboard $N              Run onboarding wizard"
+echo "  openclaw-health $N               Health check"
+echo "  openclaw-logs $N                 Follow container logs"
+echo "  openclaw${N} <command>            Run command inside container"
 if command -v tailscale >/dev/null 2>&1; then
+  echo "  openclaw-remote $N               Enable remote access (Tailscale)"
+fi
+
+if [[ "$ONBOARD" == true ]]; then
   echo ""
-  echo "Remote access (via Tailscale):"
-  echo "  openclaw-remote $N"
+  exec openclaw-onboard "$N"
 fi
