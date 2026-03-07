@@ -135,7 +135,8 @@ $COMPOSE_BIN -f "${INSTANCE_DIR}/docker-compose.yml" up -d
 EXEC_BIN="$(command -v openclaw-exec 2>/dev/null || echo "/usr/local/bin/openclaw-exec")"
 SHORTCUT="/usr/local/bin/openclaw${N}"
 if [[ ! -e "$SHORTCUT" ]] && [[ -x "$EXEC_BIN" ]]; then
-  ln -s "$EXEC_BIN" "$SHORTCUT" 2>/dev/null || true
+  ln -s "$EXEC_BIN" "$SHORTCUT" 2>/dev/null || \
+    sudo ln -s "$EXEC_BIN" "$SHORTCUT" 2>/dev/null || true
 fi
 
 echo ""
