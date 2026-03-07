@@ -667,8 +667,14 @@ print_status() {
 # ---------------------------------------------------------------------------
 
 print_summary() {
-  local auth_token
-  auth_token=$(sudo jq -r '.gateway.auth.token // "not set"' "$CONFIG" 2>/dev/null)
+  local gateway_token
+  gateway_token=$(sudo jq -r '.gateway.auth.token // "not set"' "$CONFIG" 2>/dev/null)
+
+  # Build URLs with token auto-fill when available
+  local token_param=""
+  if [[ "$gateway_token" != "not set" && -n "$gateway_token" ]]; then
+    token_param="?token=${gateway_token}"
+  fi
 
   echo ""
   echo "============================================"
@@ -677,14 +683,14 @@ print_summary() {
   echo ""
 
   if [[ -n "$TS_HOSTNAME" ]]; then
-    echo "  Dashboard URL : https://${TS_HOSTNAME}/"
+    echo "  Dashboard URL : https://${TS_HOSTNAME}/${token_param}"
   fi
-  echo "  Fallback URL  : http://${TS_IP}:${API_PORT}/"
-  echo "  Auth token    : $auth_token"
+  echo "  Fallback URL  : http://${TS_IP}:${API_PORT}/${token_param}"
+  echo "  Gateway token : $gateway_token"
   echo ""
   if [[ -n "$TS_HOSTNAME" ]]; then
     echo "Open the Dashboard URL from any device on your tailnet."
-    echo "When prompted for auth, paste the token shown above."
+    echo "The gateway token is embedded in the URL and will be saved automatically."
     echo "HTTPS certificates may take up to 30 seconds to provision on first use."
     echo ""
   else
