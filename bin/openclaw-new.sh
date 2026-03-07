@@ -2,13 +2,21 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: openclaw-new [--pull] [--port API_PORT] [-o] [--preset NAME] N|N-M"
-  echo "Example: openclaw-new 3                          (auto ports: 38789/38790)"
-  echo "         openclaw-new 3-5                        (create instances 3, 4, 5)"
-  echo "         openclaw-new --pull 3                   (pull latest image first)"
-  echo "         openclaw-new --port 9000 6              (custom ports: 9000/9001)"
-  echo "         openclaw-new -o 3                       (create and start onboarding)"
-  echo "         openclaw-new --preset default 2-4       (skip onboarding, apply preset)"
+  echo "Usage: openclaw-new [options] N|N-M [--preset NAME]"
+  echo ""
+  echo "Examples:"
+  echo "  openclaw-new 3                          Create instance 3 (ports 38789/38790)"
+  echo "  openclaw-new 2-4                        Create instances 2, 3, 4"
+  echo "  openclaw-new 2-4 --preset default       Create + auto-configure (no onboarding)"
+  echo "  openclaw-new --pull 3                   Pull latest image first"
+  echo "  openclaw-new --port 9000 6              Custom ports: 9000/9001"
+  echo "  openclaw-new -o 3                       Create and start onboarding"
+  echo ""
+  echo "Options:"
+  echo "  --pull            Pull latest Docker image before creating"
+  echo "  --port PORT       Use a custom API port (WS = PORT+1)"
+  echo "  -o, --onboard     Start interactive onboarding after creation"
+  echo "  --preset NAME     Skip onboarding, apply a preset config"
   echo ""
   echo "Available presets:"
   local pdir="${OPENCLAW_MGR_PRESETS:-/usr/local/share/openclaw-manager/presets}"
@@ -20,6 +28,8 @@ usage() {
   else
     echo "  (none found)"
   fi
+  echo ""
+  echo "Create your own presets with: openclaw-preset"
 }
 
 need_cmd() {
@@ -57,17 +67,25 @@ PULL=false
 CUSTOM_PORT=""
 ONBOARD=false
 PRESET=""
+RANGE_ARG=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pull) PULL=true; shift ;;
     --port) CUSTOM_PORT="${2:-}"; shift 2 ;;
     -o|--onboard) ONBOARD=true; shift ;;
     --preset) PRESET="${2:-}"; shift 2 ;;
-    *)      break ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      if [[ -z "$RANGE_ARG" ]]; then
+        RANGE_ARG="$1"
+      else
+        echo "Error: unexpected argument '$1'"
+        usage; exit 1
+      fi
+      shift
+      ;;
   esac
 done
-
-RANGE_ARG="${1:-}"
 
 # Parse N or N-M range
 if [[ "$RANGE_ARG" =~ ^([0-9]+)-([0-9]+)$ ]]; then
