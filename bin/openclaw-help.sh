@@ -8,29 +8,32 @@ OpenClaw Multi-Instance Manager -- Command Reference
 INSTANCE LIFECYCLE
 ------------------
 
-  openclaw-new N
-      Create a new OpenClaw instance #N with automatic ports (N8789/N8790).
+  openclaw-new [options] N|N-M [--preset NAME]
+      Create one or more OpenClaw instances with automatic ports (N8789/N8790).
       Options:
         --pull          Pull the latest Docker image before creating
         --port PORT     Use a custom API port (WS port = PORT+1)
         -o, --onboard   Start onboarding wizard immediately after creation
-      Example:
-        openclaw-new 3
-        openclaw-new -o 3                   (create + onboard in one step)
+        --preset NAME   Skip onboarding, apply a preset config
+      Examples:
+        openclaw-new 3                        (single instance)
+        openclaw-new 2-4                      (range of instances)
+        openclaw-new 2-4 --preset default     (range + auto-configure)
+        openclaw-new -o 3                     (create + onboard in one step)
         openclaw-new --pull --port 9000 6
 
   openclaw-onboard N
       Run the interactive onboarding wizard for instance #N.
       This sets up your config (API keys, Telegram bot, etc.).
-      Must be run after openclaw-new.
+      Must be run after openclaw-new (not needed if --preset was used).
 
   openclaw-update N
       Pull the latest OpenClaw Docker image and recreate instance #N.
 
-  openclaw-delete N
-      Delete instance #N (container, compose file, and data directory).
-      Prompts for confirmation (type DELETE). Also cleans up Tailscale
-      Serve if it was active for that instance.
+  openclaw-delete N|N-M
+      Delete instance(s) (container, compose file, and data directory).
+      Supports ranges (e.g. openclaw-delete 2-4). Prompts once for
+      confirmation (type DELETE). Also cleans up Tailscale Serve.
 
 RUNNING COMMANDS
 ----------------
@@ -81,6 +84,22 @@ REMOTE ACCESS (via Tailscale)
 
   openclaw-remote N --approve --yes
       Auto-approve all pending devices without confirmation.
+
+PRESETS
+-------
+
+  openclaw-preset list
+      List available presets.
+
+  openclaw-preset show NAME
+      Show the contents of a preset.
+
+  openclaw-preset create
+      Interactively create a new preset (prompts for settings).
+
+  Built-in presets:
+    default   Loopback binding, insecure auth enabled
+    remote    LAN binding, insecure auth enabled (for Tailscale)
 
 HELP
 ----

@@ -34,7 +34,7 @@ if [[ -n "${SUDO_USER:-}" ]] && ! id -nG "$SUDO_USER" 2>/dev/null | grep -qw doc
   echo "Added $SUDO_USER to the docker group. Log out and back in (or run 'newgrp docker') for this to take effect."
 fi
 
-mkdir -p "$BIN_DIR" "$SHARE_DIR/templates"
+mkdir -p "$BIN_DIR" "$SHARE_DIR/templates" "$SHARE_DIR/presets"
 
 install -m 0755 "${REPO_DIR}/bin/openclaw-new.sh"    "${BIN_DIR}/openclaw-new"
 install -m 0755 "${REPO_DIR}/bin/openclaw-delete.sh" "${BIN_DIR}/openclaw-delete"
@@ -46,8 +46,15 @@ install -m 0755 "${REPO_DIR}/bin/openclaw-remote.sh"  "${BIN_DIR}/openclaw-remot
 install -m 0755 "${REPO_DIR}/bin/openclaw-logs.sh"    "${BIN_DIR}/openclaw-logs"
 install -m 0755 "${REPO_DIR}/bin/openclaw-health.sh"  "${BIN_DIR}/openclaw-health"
 install -m 0755 "${REPO_DIR}/bin/openclaw-help.sh"    "${BIN_DIR}/openclaw-help"
+install -m 0755 "${REPO_DIR}/bin/openclaw-preset.sh"  "${BIN_DIR}/openclaw-preset"
 
 install -m 0644 "${REPO_DIR}/templates/docker-compose.yml.tmpl" "${SHARE_DIR}/templates/docker-compose.yml.tmpl"
+
+# Install preset files
+for preset in "${REPO_DIR}/presets/"*.json; do
+  [[ -f "$preset" ]] || continue
+  install -m 0644 "$preset" "${SHARE_DIR}/presets/$(basename "$preset")"
+done
 
 # Create openclawN shortcut symlinks for existing instances
 USER_HOME="${SUDO_USER:+$(eval echo "~${SUDO_USER}")}"
@@ -71,13 +78,18 @@ if [[ -n "${SUDO_USER:-}" ]] && id -nG "$SUDO_USER" 2>/dev/null | grep -qw docke
   echo ""
 fi
 echo "Commands:"
-echo "  openclaw-new N"
-echo "  openclaw-delete N"
-echo "  openclaw-onboard N"
-echo "  openclaw-update N"
-echo "  openclaw-exec N [cmd...]"
-echo "  openclaw-remote N"
-echo "  openclaw-logs N"
-echo "  openclaw-health N"
-echo "  openclaw-help"
-echo "  openclaw-list"
+echo "  openclaw-new N|N-M [--preset NAME]   Create instance(s)"
+echo "  openclaw-delete N|N-M                Delete instance(s)"
+echo "  openclaw-onboard N                   Run onboarding wizard"
+echo "  openclaw-preset [list|show|create]   Manage config presets"
+echo "  openclaw-update N                    Update instance"
+echo "  openclaw-exec N [cmd...]             Run command in container"
+echo "  openclaw-remote N                    Remote access (Tailscale)"
+echo "  openclaw-logs N                      Follow container logs"
+echo "  openclaw-health N                    Health check"
+echo "  openclaw-list                        List all instances"
+echo "  openclaw-help                        Full command reference"
+echo ""
+echo "Quick start:"
+echo "  openclaw-new 1 -o                    Create + onboard interactively"
+echo "  openclaw-new 2-4 --preset default    Create 3 instances, auto-configured"
