@@ -2,12 +2,24 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: openclaw-new [--pull] [--port API_PORT] [-o] N|N-M"
+  echo "Usage: openclaw-new [--pull] [--port API_PORT] [-o] [--preset NAME] N|N-M"
   echo "Example: openclaw-new 3                          (auto ports: 38789/38790)"
   echo "         openclaw-new 3-5                        (create instances 3, 4, 5)"
   echo "         openclaw-new --pull 3                   (pull latest image first)"
   echo "         openclaw-new --port 9000 6              (custom ports: 9000/9001)"
   echo "         openclaw-new -o 3                       (create and start onboarding)"
+  echo "         openclaw-new --preset default 2-4       (skip onboarding, apply preset)"
+  echo ""
+  echo "Available presets:"
+  local pdir="${OPENCLAW_MGR_PRESETS:-/usr/local/share/openclaw-manager/presets}"
+  if [[ -d "$pdir" ]]; then
+    for f in "$pdir"/*.json; do
+      [[ -f "$f" ]] || continue
+      echo "  $(basename "$f" .json)"
+    done
+  else
+    echo "  (none found)"
+  fi
 }
 
 need_cmd() {
@@ -44,11 +56,13 @@ render_template() {
 PULL=false
 CUSTOM_PORT=""
 ONBOARD=false
+PRESET=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pull) PULL=true; shift ;;
     --port) CUSTOM_PORT="${2:-}"; shift 2 ;;
     -o|--onboard) ONBOARD=true; shift ;;
+    --preset) PRESET="${2:-}"; shift 2 ;;
     *)      break ;;
   esac
 done
@@ -84,6 +98,23 @@ if [[ "$IS_RANGE" == true ]]; then
   fi
 fi
 
+# --preset and -o are mutually exclusive
+if [[ -n "$PRESET" && "$ONBOARD" == true ]]; then
+  echo "Error: --preset and -o/--onboard cannot be used together."
+  exit 1
+fi
+
+# Resolve preset file
+PRESET_FILE=""
+if [[ -n "$PRESET" ]]; then
+  PRESET_DIR="${OPENCLAW_MGR_PRESETS:-/usr/local/share/openclaw-manager/presets}"
+  PRESET_FILE="${PRESET_DIR}/${PRESET}.json"
+  if [[ ! -f "$PRESET_FILE" ]]; then
+    echo "Error: preset '$PRESET' not found at $PRESET_FILE"
+    exit 1
+  fi
+fi
+
 need_cmd docker
 need_cmd sed
 
@@ -107,6 +138,49 @@ if [[ "$PULL" == true ]]; then
   echo "Pulling latest OpenClaw image..."
   docker pull ghcr.io/phioranex/openclaw-docker:latest
 fi
+
+# ---------------------------------------------------------------------------
+# Apply a preset: run onboarding non-interactively, then merge preset values
+# ---------------------------------------------------------------------------
+
+apply_preset() {
+  local n="$1" data_dir="$2" preset_file="$3"
+  local container="openclaw${n}-gateway"
+  local config="${data_dir}/openclaw.json"
+
+  echo "Running onboarding (non-interactive)..."
+  docker exec "$container" openclaw onboard --non-interactive 2>/dev/null || true
+
+  # Wait briefly for config to be written
+  local tries=0
+  while [[ ! -f "$config" ]] && [[ $tries -lt 10 ]]; do
+    sleep 1
+    ((tries++)) || true
+  done
+
+  if [[ ! -f "$config" ]]; then
+    echo "Warning: openclaw.json not generated. Preset not applied."
+    return 1
+  fi
+
+  # Merge preset values into the generated config
+  local tmp
+  tmp=$(mktemp)
+  if sudo jq -s '.[0] * .[1]' "$config" "$preset_file" > "$tmp" && jq empty "$tmp" 2>/dev/null; then
+    local owner
+    owner=$(sudo stat -c '%u:%g' "$config")
+    sudo mv "$tmp" "$config"
+    sudo chown "$owner" "$config"
+    echo "Preset '${PRESET}' applied."
+
+    # Restart to pick up new config
+    docker restart "$container" >/dev/null 2>&1 || true
+  else
+    rm -f "$tmp"
+    echo "Warning: failed to apply preset."
+    return 1
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Create a single instance
@@ -171,6 +245,11 @@ create_instance() {
       sudo ln -s "$EXEC_BIN" "$SHORTCUT" 2>/dev/null || true
   fi
 
+  # Apply preset if specified
+  if [[ -n "$PRESET_FILE" ]]; then
+    apply_preset "$N" "$DATA_DIR" "$PRESET_FILE"
+  fi
+
   echo ""
   echo "Created OpenClaw instance #$N"
   echo "Container : $CONTAINER"
@@ -206,12 +285,20 @@ if [[ "$IS_RANGE" == true ]]; then
   echo "Done: $CREATED created, $FAILED skipped."
   echo ""
   echo "Useful commands:"
-  for (( i=RANGE_START; i<=RANGE_END; i++ )); do
-    echo "  openclaw-onboard $i"
-  done
+  if [[ -z "$PRESET_FILE" ]]; then
+    for (( i=RANGE_START; i<=RANGE_END; i++ )); do
+      echo "  openclaw-onboard $i"
+    done
+  else
+    for (( i=RANGE_START; i<=RANGE_END; i++ )); do
+      echo "  openclaw-health $i"
+    done
+  fi
 else
   echo "Useful commands:"
-  echo "  openclaw-onboard $RANGE_START              Run onboarding wizard"
+  if [[ -z "$PRESET_FILE" ]]; then
+    echo "  openclaw-onboard $RANGE_START              Run onboarding wizard"
+  fi
   echo "  openclaw-health $RANGE_START               Health check"
   echo "  openclaw-logs $RANGE_START                 Follow container logs"
   echo "  openclaw${RANGE_START} <command>            Run command inside container"

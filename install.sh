@@ -34,7 +34,7 @@ if [[ -n "${SUDO_USER:-}" ]] && ! id -nG "$SUDO_USER" 2>/dev/null | grep -qw doc
   echo "Added $SUDO_USER to the docker group. Log out and back in (or run 'newgrp docker') for this to take effect."
 fi
 
-mkdir -p "$BIN_DIR" "$SHARE_DIR/templates"
+mkdir -p "$BIN_DIR" "$SHARE_DIR/templates" "$SHARE_DIR/presets"
 
 install -m 0755 "${REPO_DIR}/bin/openclaw-new.sh"    "${BIN_DIR}/openclaw-new"
 install -m 0755 "${REPO_DIR}/bin/openclaw-delete.sh" "${BIN_DIR}/openclaw-delete"
@@ -48,6 +48,12 @@ install -m 0755 "${REPO_DIR}/bin/openclaw-health.sh"  "${BIN_DIR}/openclaw-healt
 install -m 0755 "${REPO_DIR}/bin/openclaw-help.sh"    "${BIN_DIR}/openclaw-help"
 
 install -m 0644 "${REPO_DIR}/templates/docker-compose.yml.tmpl" "${SHARE_DIR}/templates/docker-compose.yml.tmpl"
+
+# Install preset files
+for preset in "${REPO_DIR}/presets/"*.json; do
+  [[ -f "$preset" ]] || continue
+  install -m 0644 "$preset" "${SHARE_DIR}/presets/$(basename "$preset")"
+done
 
 # Create openclawN shortcut symlinks for existing instances
 USER_HOME="${SUDO_USER:+$(eval echo "~${SUDO_USER}")}"
