@@ -231,10 +231,11 @@ edit_config_enable() {
 
   sudo cp "$config" "${config}.bak"
 
+  local https_port="${N}443"
   local origins_json
   if [[ -n "$TS_HOSTNAME" ]]; then
     origins_json=$(jq -n \
-      --arg ts_https "https://${TS_HOSTNAME}:${API_PORT}" \
+      --arg ts_https "https://${TS_HOSTNAME}:${https_port}" \
       --arg ts_ip "http://${TS_IP}:${API_PORT}" \
       --arg local_api "http://localhost:${API_PORT}" \
       --arg local_loop "http://127.0.0.1:${API_PORT}" \
@@ -267,7 +268,7 @@ edit_config_enable() {
   restore_ownership "$config" "$owner"
   trap - EXIT
 
-  echo "Config updated: gateway.bind=lan, allowedOrigins set."
+  echo "Config updated."
 }
 
 # ---------------------------------------------------------------------------
@@ -400,16 +401,12 @@ setup_firewall() {
           | grep -E "REJECT|DROP" | head -1 | awk '{print $1}')
 
         if [[ -n "$block_line" ]]; then
-          echo "Detected restrictive iptables rules. Adding Tailscale interface rule..."
           sudo iptables -I INPUT "$block_line" -i tailscale0 -j ACCEPT 2>/dev/null || {
-            echo "Warning: Could not add iptables rule for tailscale0."
-            echo "  You may need to run manually:"
-            echo "    sudo iptables -I INPUT $block_line -i tailscale0 -j ACCEPT"
+            echo "Warning: run manually: sudo iptables -I INPUT $block_line -i tailscale0 -j ACCEPT"
           }
         elif [[ "$input_policy" == "DROP" ]]; then
-          echo "Detected DROP policy on INPUT chain. Adding Tailscale interface rule..."
           sudo iptables -A INPUT -i tailscale0 -j ACCEPT 2>/dev/null || {
-            echo "Warning: Could not add iptables rule for tailscale0."
+            echo "Warning: run manually: sudo iptables -A INPUT -i tailscale0 -j ACCEPT"
           }
         fi
 
@@ -446,25 +443,19 @@ setup_firewall() {
 # ---------------------------------------------------------------------------
 
 setup_tailscale_serve() {
-  # Each instance gets its own HTTPS port matching its API port (N8789),
-  # so multiple instances can coexist on the same Tailscale hostname:
-  #   Instance 1: https://hostname:18789/
-  #   Instance 2: https://hostname:28789/
-  echo "Setting up Tailscale Serve (HTTPS :${API_PORT} -> localhost:${API_PORT})..."
-  if ! sudo tailscale serve --bg --https="$API_PORT" "http://127.0.0.1:${API_PORT}" 2>&1; then
-    echo "Warning: tailscale serve failed."
-    echo "  Possible causes:"
-    echo "  - MagicDNS not enabled (enable at https://login.tailscale.com/admin/dns)"
-    echo "  - HTTPS certificates not yet provisioned (wait a minute, then retry)"
-    echo "  - Tailscale Serve not available on your plan"
-    echo ""
-    echo "  You can still access the dashboard via: http://${TS_IP}:${API_PORT}"
+  # Use a separate HTTPS port (N443) so it doesn't conflict with Docker's
+  # host port binding (N8789):
+  #   Instance 1: https://hostname:1443/ -> 127.0.0.1:18789
+  #   Instance 2: https://hostname:2443/ -> 127.0.0.1:28789
+  HTTPS_PORT="${N}443"
+  if ! sudo tailscale serve --bg --https="$HTTPS_PORT" "http://127.0.0.1:${API_PORT}" 2>&1; then
+    echo "Warning: tailscale serve failed. Use fallback: http://${TS_IP}:${API_PORT}"
   fi
 }
 
 stop_tailscale_serve() {
-  sudo tailscale serve --https="$API_PORT" off 2>/dev/null || true
-  echo "Tailscale Serve stopped for port $API_PORT."
+  HTTPS_PORT="${N}443"
+  sudo tailscale serve --https="$HTTPS_PORT" off 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -472,18 +463,15 @@ stop_tailscale_serve() {
 # ---------------------------------------------------------------------------
 
 restart_and_wait() {
-  docker restart "$CONTAINER"
+  docker restart "$CONTAINER" >/dev/null
 
-  echo "Waiting for gateway to start..."
   local i
   for i in $(seq 1 10); do
     if curl -sf -o /dev/null "http://127.0.0.1:${API_PORT}/" 2>/dev/null; then
-      echo "Gateway is responding."
       return 0
     fi
     if [[ "$i" -eq 10 ]]; then
-      echo "Warning: Gateway not responding after 10 seconds."
-      echo "  Check logs: docker logs $CONTAINER --tail 20"
+      echo "Warning: gateway not responding. Check: openclaw-logs $N --tail 20"
     fi
     sleep 1
   done
@@ -664,32 +652,20 @@ print_summary() {
     token_param="?token=${gateway_token}"
   fi
 
-  echo ""
-  echo "============================================"
-  echo "Remote access enabled for OpenClaw instance #$N"
-  echo "============================================"
-  echo ""
+  local https_port="${N}443"
 
-  if [[ -n "$TS_HOSTNAME" ]]; then
-    echo "  Dashboard URL : https://${TS_HOSTNAME}:${API_PORT}/${token_param}"
-  fi
-  echo "  Fallback URL  : http://${TS_IP}:${API_PORT}/${token_param}"
-  echo "  Gateway token : $gateway_token"
+  echo ""
+  echo "Remote access enabled for instance #$N"
   echo ""
   if [[ -n "$TS_HOSTNAME" ]]; then
-    echo "Open the Dashboard URL from any device on your tailnet."
-    echo "The gateway token is embedded in the URL and will be saved automatically."
-    echo "HTTPS certificates may take up to 30 seconds to provision on first use."
-    echo ""
-  else
-    echo "Open the Fallback URL from any device on your tailnet."
-    echo ""
+    echo "  Dashboard : https://${TS_HOSTNAME}:${https_port}/${token_param}"
   fi
-  echo "If a new device needs pairing later, run:"
-  echo "  openclaw-remote $N --approve"
+  echo "  Fallback  : http://${TS_IP}:${API_PORT}/${token_param}"
+  echo "  Token     : $gateway_token"
   echo ""
-  echo "To check status:  openclaw-remote $N --status"
-  echo "To disable:       openclaw-remote $N --off"
+  echo "  Approve   : openclaw-remote $N --approve"
+  echo "  Status    : openclaw-remote $N --status"
+  echo "  Disable   : openclaw-remote $N --off"
 }
 
 # ---------------------------------------------------------------------------
@@ -700,41 +676,24 @@ do_enable() {
   get_tailscale_info
   get_instance_info
 
-  echo "Enabling remote access for OpenClaw instance #$N..."
-  echo ""
-
   edit_config_enable
   setup_firewall
+  restart_and_wait
 
   if [[ -n "$TS_HOSTNAME" ]]; then
     setup_tailscale_serve
-  else
-    echo "Skipping Tailscale Serve (no DNS name available)."
-    echo "Access the dashboard via: http://${TS_IP}:${API_PORT}"
   fi
 
-  restart_and_wait
-
-  # Auto-approve any pending device pairing requests so the dashboard
-  # is immediately usable without a separate --approve step.
   AUTO_YES=true approve_devices
-
   print_summary
 }
 
 do_disable() {
   get_instance_info
-
-  echo "Disabling remote access for OpenClaw instance #$N..."
-  echo ""
-
   edit_config_disable
   stop_tailscale_serve
   restart_and_wait
-
-  echo ""
-  echo "Remote access disabled for instance #$N."
-  echo "Dashboard is now only accessible from localhost: http://127.0.0.1:${API_PORT}/"
+  echo "Remote access disabled. Local only: http://127.0.0.1:${API_PORT}/"
 }
 
 do_status() {
