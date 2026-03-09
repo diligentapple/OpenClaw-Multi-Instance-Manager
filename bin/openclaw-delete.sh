@@ -90,7 +90,7 @@ delete_instance() {
 
   # Data dir may contain files owned by UID 1000 (container's node user).
   if [[ -d "$DATA_DIR" ]]; then
-    docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/cleanup" ghcr.io/phioranex/openclaw-docker:latest -c 'rm -rf /cleanup/*'
+    docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/cleanup" ghcr.io/openclaw/openclaw:latest -c 'rm -rf /cleanup/*'
   fi
   rm -rf "${DATA_DIR}" "${INSTANCE_DIR}"
 

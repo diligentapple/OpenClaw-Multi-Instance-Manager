@@ -7,17 +7,27 @@ N="${1:-}"
 [[ "$N" =~ ^[0-9]+$ ]] || { usage; exit 1; }
 
 HOME_DIR="${HOME:-/root}"
+INSTANCE_DIR="${HOME_DIR}/openclaw${N}"
 DATA_DIR="${HOME_DIR}/.openclaw${N}"
+COMPOSE_FILE="${INSTANCE_DIR}/docker-compose.yml"
 
 if [[ ! -d "$DATA_DIR" ]]; then
   echo "Data directory $DATA_DIR not found. Run openclaw-new $N first."
   exit 1
 fi
 
+if [[ ! -f "$COMPOSE_FILE" ]]; then
+  echo "Compose file $COMPOSE_FILE not found. Run openclaw-new $N first."
+  exit 1
+fi
+
+COMPOSE_BIN="docker compose"
+if ! docker compose version >/dev/null 2>&1; then
+  COMPOSE_BIN="docker-compose"
+fi
+
 echo "Running onboarding for instance #$N..."
-docker run -it --rm \
-  -v "${DATA_DIR}:/home/node/.openclaw" \
-  ghcr.io/phioranex/openclaw-docker:latest onboard
+$COMPOSE_BIN -f "$COMPOSE_FILE" run --rm openclaw-cli onboard --mode local
 
 # Always enable insecure auth so HTTP fallback URLs work without HTTPS
 CONFIG="${DATA_DIR}/openclaw.json"

@@ -25,7 +25,7 @@ if [[ -z "${API_PORT:-}" ]]; then
   exit 1
 fi
 
-if curl -sf "http://127.0.0.1:${API_PORT}/health" 2>/dev/null; then
+if curl -sf "http://127.0.0.1:${API_PORT}/healthz" 2>/dev/null; then
   echo ""
 else
   echo "Instance #$N is not responding on port $API_PORT."

@@ -1,8 +1,8 @@
 # OpenClaw Multi-Instance Manager
 
-Manage multiple [OpenClaw](https://github.com/phioranex/openclaw-docker) Docker instances on a single machine with deterministic naming, ports, and data directories.
+Manage multiple [OpenClaw](https://github.com/openclaw/openclaw) Docker instances on a single machine with deterministic naming, ports, and data directories.
 
-This tool wraps the official OpenClaw Docker image (`ghcr.io/phioranex/openclaw-docker:latest`) to make it easy to run multiple isolated instances on a single VPS.
+This tool wraps the official OpenClaw Docker image (`ghcr.io/openclaw/openclaw`) to make it easy to run multiple isolated instances on a single VPS.
 
 ## Prerequisites
 
@@ -202,10 +202,12 @@ Each instance N gets deterministic ports:
 
 ## Directory Layout
 
-| Path              | Purpose                          |
-|-------------------|----------------------------------|
-| `~/openclawN/`    | Compose file for instance N      |
-| `~/.openclawN/`   | Persistent data for instance N   |
+| Path                          | Purpose                                    |
+|-------------------------------|--------------------------------------------|
+| `~/openclawN/`                | Compose file + `.env` for instance N       |
+| `~/.openclawN/`               | Persistent data for instance N             |
+| `~/.openclawN/openclaw.json`  | Main configuration                         |
+| `~/.openclawN/workspace/`     | Working directory                          |
 
 ## Command Reference
 
@@ -228,7 +230,9 @@ Run `openclaw-help` for detailed usage of every command.
 
 ## Notes
 
-- 1 instance = 1 container
+- Uses the official `ghcr.io/openclaw/openclaw` image (gateway + CLI services)
+- Each instance runs a gateway container and can launch a CLI container on-demand
+- 1 instance = 1 gateway container
 - Instances don't interfere with each other
 - Safe to run many on one VPS
 - Creating an instance with a number that already exists is blocked -- you must delete first
@@ -301,7 +305,7 @@ Ports are bound to `0.0.0.0` by default. For production, consider:
 
 ## Credits
 
-This project manages instances of the [OpenClaw Docker image](https://github.com/phioranex/openclaw-docker) (`ghcr.io/phioranex/openclaw-docker`) by [@phioranex](https://github.com/phioranex).
+This project manages instances of the official [OpenClaw Docker image](https://github.com/openclaw/openclaw) (`ghcr.io/openclaw/openclaw`).
 
 ## License
 
