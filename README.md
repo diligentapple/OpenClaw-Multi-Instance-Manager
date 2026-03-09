@@ -1,4 +1,5 @@
 # OpenClaw Multi-Instance Manager
+Easily create, manage, and delete multiple [OpenClaw](https://github.com/openclaw/openclaw) Docker instances on a single machine with deterministic naming, ports, data directories, and convenient shortcut commands for quick container access.
 
 Manage multiple [OpenClaw](https://github.com/openclaw/openclaw) Docker instances on a single machine with deterministic naming, ports, and data directories.
 
@@ -10,6 +11,7 @@ This tool wraps the official OpenClaw Docker image (`ghcr.io/openclaw/openclaw`)
 - Docker Engine (20.10+)
 - Docker Compose plugin (`docker compose`) or legacy `docker-compose`
 - `curl` (for one-liner install)
+Docker will be auto installed in this script (if not present on the machine).
 
 ## Install
 
@@ -39,7 +41,7 @@ or log out and back in.
 
 ## Usage
 
-### Create an instance
+### Step 1: Create an instance
 
 ```bash
 openclaw-new N
@@ -114,7 +116,7 @@ If you didn't use `--preset`, run the interactive onboarding wizard:
 openclaw-onboard N
 ```
 
-### Activate Telegram bot
+### Step 3: Activate Telegram bot
 
 After onboarding with a Telegram channel, send a message to your bot on Telegram. You will see a pairing request in the container logs:
 
@@ -146,12 +148,13 @@ openclaw-logs N
 When you create an instance, a shortcut `openclawN` is automatically created. Use it to run commands inside the container without needing `docker exec`:
 
 ```bash
-# Open an interactive shell in instance 1
-openclaw1
-
-# Run a single command
+# Directly run a single command
 openclaw1 node --version
 openclaw2 cat /app/config.json
+openclawN pairing approve telegram XXXXXX
+
+# Open an interactive shell in instance 1
+openclaw1
 ```
 
 The longer form also works:
