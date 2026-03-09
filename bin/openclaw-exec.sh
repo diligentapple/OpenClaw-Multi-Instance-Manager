@@ -46,6 +46,6 @@ else
   if docker exec "$CONTAINER" which "$1" >/dev/null 2>&1; then
     exec docker exec "$CONTAINER" "$@"
   else
-    exec docker exec "$CONTAINER" node dist/index.js "$@"
+    exec docker exec "$CONTAINER" node /app/dist/index.js "$@"
   fi
 fi

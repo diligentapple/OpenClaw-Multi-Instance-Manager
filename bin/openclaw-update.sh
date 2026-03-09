@@ -45,7 +45,7 @@ done
 # 5. Run doctor to handle config migrations
 if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   echo "Running config migration (doctor)..."
-  docker exec "$CONTAINER" node dist/index.js doctor 2>/dev/null || true
+  docker exec "$CONTAINER" node /app/dist/index.js doctor 2>/dev/null || true
 
   # 6. Restart gateway to pick up migrated config
   echo "Restarting gateway..."
