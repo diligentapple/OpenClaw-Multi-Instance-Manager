@@ -152,9 +152,11 @@ if [[ ! -f "$TEMPLATE" ]]; then
   exit 1
 fi
 
+OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:latest"
+
 if [[ "$PULL" == true ]]; then
   echo "Pulling latest OpenClaw image..."
-  docker pull ghcr.io/phioranex/openclaw-docker:latest
+  docker pull "$OPENCLAW_IMAGE"
 fi
 
 # ---------------------------------------------------------------------------
@@ -228,9 +230,15 @@ apply_preset() {
   sudo chown 1000:1000 "$config"
   rm -f "$tmp"
 
+  # If the preset sets bind=lan, update the .env so the gateway command matches
+  local instance_dir="${HOME_DIR}/openclaw${n}"
+  if grep -q '"bind": "lan"' "$preset_file"; then
+    sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=lan/' "${instance_dir}/.env"
+  fi
+
   # Restart to pick up new config
   local container="openclaw${n}-gateway"
-  docker restart "$container" >/dev/null 2>&1 || true
+  $COMPOSE_BIN -f "${instance_dir}/docker-compose.yml" up -d --force-recreate >/dev/null 2>&1 || true
 
   echo "Preset '${PRESET}' applied (token: ${token:0:12}...)"
 }
@@ -280,12 +288,20 @@ create_instance() {
   fi
 
   mkdir -p "$INSTANCE_DIR" "$DATA_DIR"
-  # Container runs as uid 1000 (node). Create workspace with correct ownership
-  # without requiring sudo on the host.
-  docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/setup" ghcr.io/phioranex/openclaw-docker:latest \
-    -c 'mkdir -p /setup/workspace && chown -R 1000:1000 /setup'
+  # Container runs as uid 1000 (node). Create workspace and identity dirs
+  # with correct ownership without requiring sudo on the host.
+  docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/setup" "$OPENCLAW_IMAGE" \
+    -c 'mkdir -p /setup/workspace /setup/identity && chown -R 1000:1000 /setup'
 
   render_template "$TEMPLATE" "${INSTANCE_DIR}/docker-compose.yml"
+
+  # Generate per-instance .env file for docker compose
+  local gw_token
+  gw_token=$(gen_token)
+  cat > "${INSTANCE_DIR}/.env" <<ENVEOF
+OPENCLAW_GATEWAY_TOKEN=${gw_token}
+OPENCLAW_GATEWAY_BIND=loopback
+ENVEOF
 
   echo "Bringing up instance #$N..."
   $COMPOSE_BIN -f "${INSTANCE_DIR}/docker-compose.yml" up -d

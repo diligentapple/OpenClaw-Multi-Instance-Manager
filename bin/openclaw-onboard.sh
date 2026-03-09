@@ -8,16 +8,21 @@ N="${1:-}"
 
 HOME_DIR="${HOME:-/root}"
 DATA_DIR="${HOME_DIR}/.openclaw${N}"
+CONTAINER="openclaw${N}-gateway"
 
 if [[ ! -d "$DATA_DIR" ]]; then
   echo "Data directory $DATA_DIR not found. Run openclaw-new $N first."
   exit 1
 fi
 
+if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+  echo "Error: container '$CONTAINER' is not running."
+  echo "Use 'openclaw-list' to see running instances."
+  exit 1
+fi
+
 echo "Running onboarding for instance #$N..."
-docker run -it --rm \
-  -v "${DATA_DIR}:/home/node/.openclaw" \
-  ghcr.io/phioranex/openclaw-docker:latest onboard
+docker exec -it "$CONTAINER" node dist/index.js onboard --mode local
 
 # Always enable insecure auth so HTTP fallback URLs work without HTTPS
 CONFIG="${DATA_DIR}/openclaw.json"

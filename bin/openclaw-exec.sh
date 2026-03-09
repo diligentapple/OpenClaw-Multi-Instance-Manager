@@ -42,8 +42,7 @@ if [[ $# -eq 0 ]]; then
 else
   # If the first argument is a system binary (bash, node, cat, …)
   # run it directly.  Otherwise treat it as an OpenClaw CLI subcommand
-  # and route through the app entrypoint so commands like "pairing",
-  # "gateway", "config" etc. work correctly.
+  # and route through the app entrypoint.
   if docker exec "$CONTAINER" which "$1" >/dev/null 2>&1; then
     exec docker exec "$CONTAINER" "$@"
   else
