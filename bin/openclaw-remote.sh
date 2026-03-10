@@ -404,15 +404,16 @@ setup_firewall() {
     input_policy="${input_policy:-ACCEPT}"
 
     local has_block_rule=false
-    if sudo iptables -L INPUT -n --line-numbers 2>/dev/null | grep -qE "REJECT|DROP"; then
+    if sudo iptables -L INPUT -n --line-numbers 2>/dev/null | grep -v '^Chain' | grep -qE "REJECT|DROP"; then
       has_block_rule=true
     fi
 
     if [[ "$input_policy" == "DROP" || "$has_block_rule" == true ]]; then
       if ! sudo iptables -L INPUT -n 2>/dev/null | grep -q "tailscale0"; then
         local block_line
+        # Skip "Chain INPUT (policy DROP)" header — it matches DROP but isn't a rule line
         block_line=$(sudo iptables -L INPUT -n --line-numbers 2>/dev/null \
-          | grep -E "REJECT|DROP" | head -1 | awk '{print $1}' || true)
+          | grep -v '^Chain' | grep -E "REJECT|DROP" | head -1 | awk '{print $1}' || true)
 
         if [[ -n "$block_line" ]]; then
           sudo iptables -I INPUT "$block_line" -i tailscale0 -j ACCEPT 2>/dev/null || {
@@ -491,13 +492,15 @@ restart_and_wait() {
     docker restart "$CONTAINER" >/dev/null
   fi
 
+  echo "Waiting for gateway to start..."
   local i
-  for i in $(seq 1 10); do
-    if curl -sf -o /dev/null "http://127.0.0.1:${API_PORT}/" 2>/dev/null; then
+  for i in $(seq 1 30); do
+    if curl -sf -o /dev/null "http://127.0.0.1:${API_PORT}/healthz" 2>/dev/null; then
+      echo "Gateway is up (port $API_PORT)."
       return 0
     fi
-    if [[ "$i" -eq 10 ]]; then
-      echo "Warning: gateway not responding. Check: openclaw-logs $N --tail 20"
+    if [[ "$i" -eq 30 ]]; then
+      echo "Warning: gateway not responding after 30s. Check: openclaw-logs $N --tail 20"
     fi
     sleep 1
   done
@@ -618,7 +621,7 @@ print_status() {
   echo ""
 
   echo "Dashboard:"
-  if curl -sf -o /dev/null "http://127.0.0.1:${API_PORT}/" 2>/dev/null; then
+  if curl -sf -o /dev/null "http://127.0.0.1:${API_PORT}/healthz" 2>/dev/null; then
     echo "  Responding            : yes (port $API_PORT)"
   else
     echo "  Responding            : no"
