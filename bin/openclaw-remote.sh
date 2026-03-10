@@ -52,24 +52,23 @@ restore_ownership() {
   fi
 }
 
-# Resolve the gateway token: try openclaw.json first, fall back to the .env
-# file that openclaw-new generates (the onboarding wizard may not write the
-# token into the JSON config).
+# Resolve the gateway token.  The .env file's OPENCLAW_GATEWAY_TOKEN is the
+# authoritative source because docker-compose passes it as an environment
+# variable to the container.  The JSON config's gateway.auth.token is a
+# secondary copy that may be missing (onboarding doesn't always write it).
 resolve_token() {
   local n="$1"
   local token=""
 
-  # Try the JSON config
-  if [[ -f "$CONFIG" ]]; then
-    token=$(sudo jq -r '.gateway.auth.token // empty' "$CONFIG" 2>/dev/null || true)
+  # Authoritative: .env file created by openclaw-new
+  local env_file="${HOME_DIR}/openclaw${n}/.env"
+  if [[ -f "$env_file" ]]; then
+    token=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$env_file" 2>/dev/null || true)
   fi
 
-  # Fallback: .env file created by openclaw-new
-  if [[ -z "$token" ]]; then
-    local env_file="${HOME_DIR}/openclaw${n}/.env"
-    if [[ -f "$env_file" ]]; then
-      token=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$env_file" 2>/dev/null || true)
-    fi
+  # Fallback: JSON config
+  if [[ -z "$token" ]] && [[ -f "$CONFIG" ]]; then
+    token=$(sudo jq -r '.gateway.auth.token // empty' "$CONFIG" 2>/dev/null || true)
   fi
 
   echo "$token"
@@ -231,13 +230,11 @@ edit_config_enable() {
   tmp=$(mktemp)
   trap 'rm -f "$tmp"' EXIT
 
-  # If the token is missing from the config (onboarding may not write it),
-  # pull it from the .env file so the config is self-contained.
+  # Use the .env token as the authoritative source — it is what the container
+  # receives as OPENCLAW_GATEWAY_TOKEN.  Sync it into the JSON config so
+  # gateway.auth.token, gateway.remote.token, and the env var all match.
   local cfg_token
-  cfg_token=$(sudo jq -r '.gateway.auth.token // empty' "$config" 2>/dev/null || true)
-  if [[ -z "$cfg_token" ]]; then
-    cfg_token=$(resolve_token "$N")
-  fi
+  cfg_token=$(resolve_token "$N")
 
   if [[ -n "$cfg_token" ]]; then
     sudo jq --argjson origins "$origins_json" --arg tok "$cfg_token" '
