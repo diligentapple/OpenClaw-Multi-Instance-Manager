@@ -41,7 +41,37 @@ if [[ "$status" != "running" ]]; then
   fi
 fi
 
-docker exec -it "$CONTAINER" node dist/index.js onboard --mode local
+# The gateway may restart itself mid-onboarding (e.g. after channel selection),
+# which kills the docker-exec session.  Retry automatically so the wizard can
+# resume from where it left off.
+MAX_RETRIES=5
+for attempt in $(seq 1 "$MAX_RETRIES"); do
+  rc=0
+  docker exec -it "$CONTAINER" node dist/index.js onboard --mode local || rc=$?
+
+  # Success – wizard finished normally
+  [[ "$rc" -eq 0 ]] && break
+
+  # If the config file now exists the wizard completed before the container
+  # restarted – treat it as success.
+  [[ -f "${DATA_DIR}/openclaw.json" ]] && break
+
+  if [[ "$attempt" -eq "$MAX_RETRIES" ]]; then
+    echo "Error: onboarding failed after $MAX_RETRIES attempts (last exit code: $rc)."
+    echo "Check logs with: docker logs $CONTAINER"
+    exit 1
+  fi
+
+  echo ""
+  echo "Container restarted during onboarding – retrying (attempt $((attempt+1))/$MAX_RETRIES)..."
+
+  # Wait for the container to come back up
+  for _ in $(seq 1 30); do
+    sleep 1
+    s=$(docker inspect --format '{{.State.Status}}' "$CONTAINER" 2>/dev/null || true)
+    [[ "$s" == "running" ]] && break
+  done
+done
 
 # Always enable insecure auth so HTTP fallback URLs work without HTTPS
 CONFIG="${DATA_DIR}/openclaw.json"
