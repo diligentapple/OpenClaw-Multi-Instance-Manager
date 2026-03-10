@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Show which line crashed instead of failing silently
+trap 'echo "Error: script failed at line $LINENO (exit code $?)" >&2' ERR
+
 # ============================================================================
 # openclaw-remote -- Configure OpenClaw instances for remote Tailscale access
 # ============================================================================
@@ -126,7 +129,7 @@ check_prerequisites() {
     exit 1
   fi
 
-  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER" 2>/dev/null; then
     echo "Error: Container '$CONTAINER' is not running."
     echo "  Start it: docker start $CONTAINER"
     exit 1
@@ -152,18 +155,18 @@ check_prerequisites() {
 # ---------------------------------------------------------------------------
 
 get_instance_info() {
-  # Try docker port first
-  API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | cut -d: -f2)
+  # Try docker port first (|| true prevents pipefail crash)
+  API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | cut -d: -f2 || true)
 
   # Fallback: docker inspect
   if [[ -z "${API_PORT:-}" ]]; then
     API_PORT=$(docker inspect "$CONTAINER" \
-      --format '{{range $p, $conf := .NetworkSettings.Ports}}{{if eq $p "18789/tcp"}}{{(index $conf 0).HostPort}}{{end}}{{end}}' 2>/dev/null || echo "")
+      --format '{{range $p, $conf := .NetworkSettings.Ports}}{{if eq $p "18789/tcp"}}{{(index $conf 0).HostPort}}{{end}}{{end}}' 2>/dev/null || true)
   fi
 
   # Fallback: read from config (host networking mode)
   if [[ -z "${API_PORT:-}" ]]; then
-    API_PORT=$(sudo jq -r '.gateway.port // empty' "$CONFIG" 2>/dev/null || echo "")
+    API_PORT=$(sudo jq -r '.gateway.port // empty' "$CONFIG" 2>/dev/null || true)
   fi
 
   if [[ -z "${API_PORT:-}" ]]; then
@@ -397,7 +400,7 @@ setup_firewall() {
   if command -v iptables >/dev/null 2>&1; then
     local input_policy
     input_policy=$(sudo iptables -L INPUT -n 2>/dev/null \
-      | head -1 | sed -n 's/.*policy \([A-Z]*\).*/\1/p')
+      | head -1 | sed -n 's/.*policy \([A-Z]*\).*/\1/p' || true)
     input_policy="${input_policy:-ACCEPT}"
 
     local has_block_rule=false
@@ -409,7 +412,7 @@ setup_firewall() {
       if ! sudo iptables -L INPUT -n 2>/dev/null | grep -q "tailscale0"; then
         local block_line
         block_line=$(sudo iptables -L INPUT -n --line-numbers 2>/dev/null \
-          | grep -E "REJECT|DROP" | head -1 | awk '{print $1}')
+          | grep -E "REJECT|DROP" | head -1 | awk '{print $1}' || true)
 
         if [[ -n "$block_line" ]]; then
           sudo iptables -I INPUT "$block_line" -i tailscale0 -j ACCEPT 2>/dev/null || {
@@ -654,7 +657,7 @@ print_status() {
   fi
   if command -v iptables >/dev/null 2>&1; then
     local ts_rule="no"
-    if sudo iptables -L INPUT -n 2>/dev/null | grep -q "tailscale0"; then
+    if sudo iptables -L INPUT -n 2>/dev/null | grep -q "tailscale0" 2>/dev/null; then
       ts_rule="yes"
     fi
     echo "  iptables tailscale0   : $ts_rule"
