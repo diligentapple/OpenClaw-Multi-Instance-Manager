@@ -156,7 +156,7 @@ check_prerequisites() {
 
 get_instance_info() {
   # Try docker port first (|| true prevents pipefail crash)
-  API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | cut -d: -f2 || true)
+  API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | awk -F: '{print $NF}' || true)
 
   # Fallback: docker inspect
   if [[ -z "${API_PORT:-}" ]]; then
@@ -555,14 +555,14 @@ approve_devices() {
   while read -r rid; do
     echo "Approving $rid ..."
     if docker exec "$CONTAINER" node /app/dist/index.js devices approve "$rid" 2>&1; then
-      ((approved++))
+      ((approved++)) || true
     else
       echo "  Warning: 'devices approve' failed for $rid, trying 'pairing approve' ..."
       if docker exec "$CONTAINER" node /app/dist/index.js pairing approve "$rid" 2>&1; then
-        ((approved++))
+        ((approved++)) || true
       else
         echo "  Error: Could not approve $rid"
-        ((failed++))
+        ((failed++)) || true
       fi
     fi
   done <<< "$request_ids"
@@ -595,8 +595,8 @@ print_status() {
   echo ""
 
   local bind_val origins_val
-  bind_val=$(sudo jq -r '.gateway.bind // "not set"' "$CONFIG" 2>/dev/null)
-  origins_val=$(sudo jq -r '.gateway.controlUi.allowedOrigins // [] | join(", ")' "$CONFIG" 2>/dev/null)
+  bind_val=$(sudo jq -r '.gateway.bind // "not set"' "$CONFIG" 2>/dev/null || echo "unknown")
+  origins_val=$(sudo jq -r '.gateway.controlUi.allowedOrigins // [] | join(", ")' "$CONFIG" 2>/dev/null || echo "")
 
   echo "Config:"
   echo "  gateway.bind          : $bind_val"
@@ -722,9 +722,9 @@ wait_and_approve() {
       local approved=0
       while read -r rid; do
         if docker exec "$CONTAINER" node /app/dist/index.js devices approve "$rid" 2>&1; then
-          ((approved++))
+          ((approved++)) || true
         elif docker exec "$CONTAINER" node /app/dist/index.js pairing approve "$rid" 2>&1; then
-          ((approved++))
+          ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"
         fi
