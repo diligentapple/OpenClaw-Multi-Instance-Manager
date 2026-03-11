@@ -44,8 +44,8 @@ else
   # run it directly.  Otherwise treat it as an OpenClaw CLI subcommand
   # and route through the app entrypoint.
   if docker exec "$CONTAINER" sh -c "command -v \"$1\"" >/dev/null 2>&1; then
-    exec docker exec "$CONTAINER" "$@"
+    exec docker exec -it "$CONTAINER" "$@"
   else
-    exec docker exec "$CONTAINER" node /app/dist/index.js "$@"
+    exec docker exec -it "$CONTAINER" node /app/dist/index.js "$@"
   fi
 fi
