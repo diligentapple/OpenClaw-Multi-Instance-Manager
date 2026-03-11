@@ -61,10 +61,18 @@ Create a range of instances:
 openclaw-new 2-4
 ```
 
-To force pulling the latest image before creating:
+To force pulling the latest image before creating (recommended):
 
 ```bash
 openclaw-new --pull N
+```
+
+### Step 2: Onboarding (alternative to presets)
+
+If you didn't use `--preset`, run the interactive onboarding wizard:
+
+```bash
+openclaw-onboard N
 ```
 
 ### Step 3: Activate Telegram bot
@@ -127,14 +135,6 @@ openclaw-preset create
 - Primary model
 - Telegram bot integration (optional)
 - Tailscale remote access (if Tailscale is installed)
-
-### Onboarding (alternative to presets)
-
-If you didn't use `--preset`, run the interactive onboarding wizard:
-
-```bash
-openclaw-onboard N
-```
 
 ### Health check / logs
 
