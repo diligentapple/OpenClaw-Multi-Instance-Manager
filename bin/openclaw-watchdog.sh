@@ -62,7 +62,7 @@ if [[ "$INSTALL" == true ]]; then
   CRON_LINE="*/5 * * * * ${SELF} --threshold ${THRESHOLD} ${TARGET} >> /tmp/openclaw-watchdog.log 2>&1 ${CRON_TAG}"
 
   # Remove old entry, add new one
-  ( crontab -l 2>/dev/null | grep -v "$CRON_TAG"; echo "$CRON_LINE" ) | crontab -
+  { crontab -l 2>/dev/null | grep -v "$CRON_TAG" || true; echo "$CRON_LINE"; } | crontab -
   echo "Watchdog cron job installed (every 5 minutes, threshold=${THRESHOLD}m)."
   echo "Logs: /tmp/openclaw-watchdog.log"
   exit 0

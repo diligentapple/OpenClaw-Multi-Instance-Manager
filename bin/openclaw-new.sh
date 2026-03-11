@@ -185,7 +185,7 @@ resolve_api_key() {
 
   # Already cached?
   if [[ -f "$cache_file" ]]; then
-    API_KEY=$(cat "$cache_file")
+    API_KEY=$(sudo cat "$cache_file")
     if [[ -n "$API_KEY" ]]; then
       return
     fi

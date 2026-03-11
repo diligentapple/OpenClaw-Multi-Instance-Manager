@@ -555,14 +555,14 @@ approve_devices() {
   while read -r rid; do
     echo "Approving $rid ..."
     if docker exec "$CONTAINER" node /app/dist/index.js devices approve "$rid" 2>&1; then
-      ((approved++))
+      ((approved++)) || true
     else
       echo "  Warning: 'devices approve' failed for $rid, trying 'pairing approve' ..."
       if docker exec "$CONTAINER" node /app/dist/index.js pairing approve "$rid" 2>&1; then
-        ((approved++))
+        ((approved++)) || true
       else
         echo "  Error: Could not approve $rid"
-        ((failed++))
+        ((failed++)) || true
       fi
     fi
   done <<< "$request_ids"
@@ -722,9 +722,9 @@ wait_and_approve() {
       local approved=0
       while read -r rid; do
         if docker exec "$CONTAINER" node /app/dist/index.js devices approve "$rid" 2>&1; then
-          ((approved++))
+          ((approved++)) || true
         elif docker exec "$CONTAINER" node /app/dist/index.js pairing approve "$rid" 2>&1; then
-          ((approved++))
+          ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"
         fi

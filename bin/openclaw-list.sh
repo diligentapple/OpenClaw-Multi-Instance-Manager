@@ -8,7 +8,9 @@ printf "%-22s %-14s %s\n" "INSTANCE" "PORTS" "DASHBOARD"
 printf "%-22s %-14s %s\n" "--------" "-----" "---------"
 
 # List running openclaw containers
-docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E '^openclaw[0-9]+-gateway$' | sort | while read -r name; do
+# Use process substitution to avoid pipefail crash when no containers match grep
+while read -r name; do
+  [[ -z "$name" ]] && continue
   # Extract instance number
   n=$(echo "$name" | grep -oP '(?<=openclaw)\d+')
 
@@ -63,7 +65,7 @@ docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E '^openclaw[0-9]+-gatewa
     if [[ "$bind_val" == "lan" ]]; then
       # Check tailscale first
       if command -v tailscale >/dev/null 2>&1; then
-        ts_hostname=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // ""' 2>/dev/null | sed 's/\.$//')
+        ts_hostname=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // ""' 2>/dev/null | sed 's/\.$//' || true)
         if [[ -n "$ts_hostname" && "$ts_hostname" != "null" ]]; then
           dashboard="https://${ts_hostname}:${api_port}/${token_param}"
         fi
@@ -78,4 +80,4 @@ docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E '^openclaw[0-9]+-gatewa
   fi
 
   printf "%-22s %-14s %s\n" "$name" "$ports" "$dashboard"
-done
+done < <(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E '^openclaw[0-9]+-gateway$' | sort || true)
