@@ -21,9 +21,12 @@
       },
       "models": {
         "openrouter/auto": {
-          "alias": "OpenRouter"
+          "alias": "OpenRouter",
+          "contextWindow": 128000
         },
-        "openrouter/anthropic/claude-haiku-4.5": {}
+        "openrouter/anthropic/claude-haiku-4.5": {
+          "contextWindow": 200000
+        }
       },
       "workspace": "/home/node/.openclaw/workspace",
       "compaction": {
