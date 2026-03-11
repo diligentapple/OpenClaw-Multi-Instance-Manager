@@ -65,6 +65,20 @@ MONITORING
       Follow container logs for instance #N.
       Extra flags are passed through to docker logs (e.g. --tail 50).
 
+  openclaw-watchdog [options] N|all
+      Monitor gateways and auto-restart frozen ones.
+      A gateway is frozen if it produces no log output within the
+      silence threshold (default: 10 minutes).
+      Options:
+        --install          Install as a cron job (runs every 5 minutes)
+        --uninstall        Remove the cron job
+        --threshold MINS   Minutes of silence before restart (default: 10)
+        --dry-run          Report without restarting
+      Examples:
+        openclaw-watchdog all                Check all instances
+        openclaw-watchdog --install all      Install cron for all instances
+        openclaw-watchdog --uninstall        Remove cron job
+
 REMOTE ACCESS (via Tailscale)
 -----------------------------
 
