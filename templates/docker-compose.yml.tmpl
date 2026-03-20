@@ -12,6 +12,7 @@ services:
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
       OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: ${OPENCLAW_ALLOW_INSECURE_PRIVATE_WS:-}
       TZ: {{TZ}}
+      NODE_OPTIONS: "--disable-warning=DEP0040"
     volumes:
       - "{{DATA_DIR}}:/home/node/.openclaw"
       - "{{DATA_DIR}}/workspace:/home/node/.openclaw/workspace"
@@ -21,14 +22,9 @@ services:
     init: true
     command:
       [
-        "node",
-        "dist/index.js",
-        "gateway",
-        "--bind",
-        "${OPENCLAW_GATEWAY_BIND:-loopback}",
-        "--port",
-        "18789",
-        "--allow-unconfigured",
+        "sh",
+        "-c",
+        "command -v lsof >/dev/null 2>&1 || { apt-get update -qq && apt-get install -yqq lsof >/dev/null 2>&1; }; exec node dist/index.js gateway --bind ${OPENCLAW_GATEWAY_BIND:-loopback} --port 18789 --allow-unconfigured",
       ]
     healthcheck:
       test:
