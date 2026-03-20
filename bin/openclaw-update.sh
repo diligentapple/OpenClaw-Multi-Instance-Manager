@@ -31,6 +31,25 @@ fi
 echo "Pulling latest OpenClaw image..."
 docker pull ghcr.io/openclaw/openclaw:latest
 
+# 2b. Re-render docker-compose template (picks up template improvements)
+TEMPLATE="${OPENCLAW_MGR_TEMPLATE:-/usr/local/share/openclaw-manager/templates/docker-compose.yml.tmpl}"
+if [[ -f "$TEMPLATE" ]]; then
+  API_PORT=$(grep -oP '"\K\d+(?=:18789")' "$COMPOSE_FILE" | head -1)
+  WS_PORT=$(grep -oP '"\K\d+(?=:18790")' "$COMPOSE_FILE" | head -1)
+  TZ=$(grep -oP 'TZ:\s*\K\S+' "$COMPOSE_FILE" | head -1)
+  TZ="${TZ:-Asia/Tokyo}"
+  if [[ -n "$API_PORT" && -n "$WS_PORT" ]]; then
+    echo "Re-rendering docker-compose template..."
+    sed \
+      -e "s/{{N}}/${N}/g" \
+      -e "s/{{API_PORT}}/${API_PORT}/g" \
+      -e "s/{{WS_PORT}}/${WS_PORT}/g" \
+      -e "s#{{DATA_DIR}}#${DATA_DIR}#g" \
+      -e "s#{{TZ}}#${TZ}#g" \
+      "$TEMPLATE" > "$COMPOSE_FILE"
+  fi
+fi
+
 # 3. Recreate container with new image
 $COMPOSE_BIN -f "$COMPOSE_FILE" up -d --force-recreate
 
