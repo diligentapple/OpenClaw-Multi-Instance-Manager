@@ -44,13 +44,17 @@ while read -r name; do
 
   # Check for dashboard URL
   dashboard=""
+  env_file="${HOME_DIR}/openclaw${n}/.env"
   config="${HOME_DIR}/.openclaw${n}/openclaw.json"
-  if [[ -f "$config" && -n "$api_port" ]]; then
-    bind_val=$(sudo jq -r '.gateway.bind // "loopback"' "$config" 2>/dev/null || echo "loopback")
-    # .env token is authoritative (it's passed to the container as an env var).
-    # Fall back to the JSON config if .env is missing.
+  if [[ -n "$api_port" ]]; then
+    # .env is authoritative — it controls the container's --bind flag and token.
+    # Read bind and token from .env first, fall back to JSON config.
+    bind_val="loopback"
+    if [[ -f "$env_file" ]]; then
+      bind_val=$(grep -oP '^OPENCLAW_GATEWAY_BIND=\K.*' "$env_file" 2>/dev/null || echo "loopback")
+      bind_val="${bind_val:-loopback}"
+    fi
     token=""
-    env_file="${HOME_DIR}/openclaw${n}/.env"
     if [[ -f "$env_file" ]]; then
       token=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$env_file" 2>/dev/null || echo "")
     fi
