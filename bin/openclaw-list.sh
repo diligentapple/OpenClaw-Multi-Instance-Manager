@@ -45,8 +45,12 @@ while read -r name; do
   # Check for dashboard URL
   dashboard=""
   config="${HOME_DIR}/.openclaw${n}/openclaw.json"
-  if [[ -f "$config" && -n "$api_port" ]]; then
-    bind_val=$(sudo jq -r '.gateway.bind // "loopback"' "$config" 2>/dev/null || echo "loopback")
+  if [[ -n "$api_port" ]]; then
+    # Read bind from config if it exists, default to loopback
+    bind_val="loopback"
+    if [[ -f "$config" ]]; then
+      bind_val=$(sudo jq -r '.gateway.bind // "loopback"' "$config" 2>/dev/null || echo "loopback")
+    fi
     # .env token is authoritative (it's passed to the container as an env var).
     # Fall back to the JSON config if .env is missing.
     token=""
@@ -54,7 +58,7 @@ while read -r name; do
     if [[ -f "$env_file" ]]; then
       token=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$env_file" 2>/dev/null || echo "")
     fi
-    if [[ -z "$token" ]]; then
+    if [[ -z "$token" && -f "$config" ]]; then
       token=$(sudo jq -r '.gateway.auth.token // empty' "$config" 2>/dev/null || echo "")
     fi
     token_param=""
