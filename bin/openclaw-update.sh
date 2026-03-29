@@ -21,7 +21,7 @@ fi
 
 # 1. Backup config before updating
 CONFIG="${DATA_DIR}/openclaw.json"
-if [[ -f "$CONFIG" ]]; then
+if sudo test -f "$CONFIG"; then
   backup="${CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
   sudo cp "$CONFIG" "$backup"
   echo "Config backed up to $backup"
@@ -70,25 +70,21 @@ if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   echo "Restarting gateway..."
   docker restart "$CONTAINER" >/dev/null 2>&1
 
-  # 7. Verify health (retry for up to 30s to allow startup + lsof install)
-  API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | awk -F: '{print $NF}' || true)
-  if [[ -n "$API_PORT" ]]; then
-    healthy=false
-    for i in $(seq 1 15); do
-      if curl -sf "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1; then
-        healthy=true
-        break
-      fi
-      sleep 2
-    done
-    if $healthy; then
-      echo "Instance #$N updated and healthy."
-    else
-      echo "Instance #$N updated but health check failed."
-      echo "  Check logs: openclaw-logs $N --tail 20"
+  # 7. Verify health via Docker's built-in healthcheck (runs inside the
+  #    container, so it works even when the gateway binds to loopback).
+  healthy=false
+  for i in $(seq 1 15); do
+    health=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "starting")
+    if [[ "$health" == "healthy" ]]; then
+      healthy=true
+      break
     fi
+    sleep 2
+  done
+  if $healthy; then
+    echo "Instance #$N updated and healthy."
   else
-    echo "Instance #$N updated but could not determine port."
+    echo "Instance #$N updated but health check failed (status: $health)."
     echo "  Check logs: openclaw-logs $N --tail 20"
   fi
 else

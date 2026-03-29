@@ -104,21 +104,12 @@ check_instance() {
     return 0
   fi
 
-  # No log output in THRESHOLD minutes — check if healthz actually responds in time
-  local api_port
-  api_port=$(docker port "$container" 18789/tcp 2>/dev/null | head -1 | awk -F: '{print $NF}' || true)
-  if [[ -n "$api_port" ]]; then
-    # Use a tight 3-second timeout to detect frozen event loops
-    if curl -sf --max-time 3 "http://127.0.0.1:${api_port}/healthz" >/dev/null 2>&1; then
-      # healthz responds but no log activity — likely frozen (processing queue stuck)
-      # Additional check: try a real API call that exercises more of the gateway
-      local status_check
-      status_check=$(curl -sf --max-time 5 "http://127.0.0.1:${api_port}/api/status" 2>/dev/null || true)
-      if [[ -n "$status_check" ]]; then
-        # API still responds — might just be idle (no messages to process)
-        return 0
-      fi
-    fi
+  # No log output in THRESHOLD minutes — check Docker's built-in healthcheck
+  local gw_health
+  gw_health=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "unknown")
+  if [[ "$gw_health" == "healthy" ]]; then
+    # Healthcheck passes but no log activity — might just be idle (no messages)
+    return 0
   fi
 
   # Gateway is frozen or unresponsive
@@ -141,7 +132,8 @@ check_instance() {
   # Wait for it to come back
   local i
   for i in $(seq 1 30); do
-    if [[ -n "$api_port" ]] && curl -sf --max-time 3 "http://127.0.0.1:${api_port}/healthz" >/dev/null 2>&1; then
+    gw_health=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "starting")
+    if [[ "$gw_health" == "healthy" ]]; then
       echo "$(date -Iseconds) [watchdog] Instance #$n: restarted and healthy."
       return 0
     fi

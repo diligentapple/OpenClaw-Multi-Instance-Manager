@@ -10,7 +10,7 @@ HOME_DIR="${HOME:-/root}"
 DATA_DIR="${HOME_DIR}/.openclaw${N}"
 CONTAINER="openclaw${N}-gateway"
 
-if [[ ! -d "$DATA_DIR" ]]; then
+if ! sudo test -d "$DATA_DIR"; then
   echo "Data directory $DATA_DIR not found. Run openclaw-new $N first."
   exit 1
 fi
@@ -61,13 +61,10 @@ fi
 # Wait for the container to come back up and respond.
 # Re-query docker port each iteration because after force-recreate the
 # container needs a moment before port mappings are available.
-API_PORT=""
 for i in $(seq 1 20); do
   sleep 1
-  if [[ -z "$API_PORT" ]]; then
-    API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | awk -F: '{print $NF}' || true)
-  fi
-  if [[ -n "${API_PORT:-}" ]] && curl -sf --max-time 3 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1; then
+  health=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "starting")
+  if [[ "$health" == "healthy" ]]; then
     echo "Gateway is up."
     break
   fi
@@ -78,7 +75,7 @@ done
 
 # Always enable insecure auth so HTTP fallback URLs work without HTTPS
 CONFIG="${DATA_DIR}/openclaw.json"
-if [[ -f "$CONFIG" ]]; then
+if sudo test -f "$CONFIG"; then
   local_tmp=$(mktemp)
   if sudo jq '.gateway.controlUi.allowInsecureAuth = true' "$CONFIG" > "$local_tmp" && jq empty "$local_tmp" 2>/dev/null; then
     owner=$(sudo stat -c '%u:%g' "$CONFIG")

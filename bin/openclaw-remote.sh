@@ -70,7 +70,7 @@ resolve_token() {
   fi
 
   # Fallback: JSON config
-  if [[ -z "$token" ]] && [[ -f "$CONFIG" ]]; then
+  if [[ -z "$token" ]] && sudo test -f "$CONFIG"; then
     token=$(sudo jq -r '.gateway.auth.token // empty' "$CONFIG" 2>/dev/null || true)
   fi
 
@@ -123,7 +123,7 @@ CONTAINER="openclaw${N}-gateway"
 check_prerequisites() {
   install_jq
 
-  if [[ ! -f "$CONFIG" ]]; then
+  if ! sudo test -f "$CONFIG"; then
     echo "Error: Instance #$N does not exist ($CONFIG not found)."
     echo "  Create it first: openclaw-new $N"
     exit 1
@@ -493,9 +493,10 @@ restart_and_wait() {
   fi
 
   echo "Waiting for gateway to start..."
-  local i
+  local i health
   for i in $(seq 1 30); do
-    if curl -sf --max-time 3 -o /dev/null "http://127.0.0.1:${API_PORT}/healthz" 2>/dev/null; then
+    health=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "starting")
+    if [[ "$health" == "healthy" ]]; then
       echo "Gateway is up (port $API_PORT)."
       return 0
     fi
@@ -618,10 +619,12 @@ print_status() {
   echo ""
 
   echo "Dashboard:"
-  if curl -sf -o /dev/null "http://127.0.0.1:${API_PORT}/healthz" 2>/dev/null; then
+  local gw_health
+  gw_health=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "unknown")
+  if [[ "$gw_health" == "healthy" ]]; then
     echo "  Responding            : yes (port $API_PORT)"
   else
-    echo "  Responding            : no"
+    echo "  Responding            : no (status: $gw_health)"
   fi
   echo ""
 
