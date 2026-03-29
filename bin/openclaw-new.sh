@@ -281,7 +281,7 @@ create_instance() {
     WS_PORT="$((CUSTOM_PORT + 1))"
   fi
 
-  if [[ -d "$INSTANCE_DIR" || -d "$DATA_DIR" ]]; then
+  if [[ -d "$INSTANCE_DIR" ]] || sudo test -d "$DATA_DIR"; then
     echo "Skipping instance #$N: already exists."
     echo " - $INSTANCE_DIR"
     echo " - $DATA_DIR"

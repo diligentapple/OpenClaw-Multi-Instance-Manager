@@ -90,7 +90,7 @@ delete_instance() {
 
   # Data dir may contain files owned by UID 1000 (container's node user).
   # Try docker first (handles uid 1000 files), fall back to sudo rm.
-  if [[ -d "$DATA_DIR" ]]; then
+  if sudo test -d "$DATA_DIR"; then
     docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/cleanup" ghcr.io/openclaw/openclaw:latest -c 'rm -rf /cleanup/*' 2>/dev/null \
       || sudo rm -rf "${DATA_DIR:?}"/* 2>/dev/null || true
   fi
