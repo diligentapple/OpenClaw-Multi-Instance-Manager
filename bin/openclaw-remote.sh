@@ -148,9 +148,14 @@ check_prerequisites() {
   if [[ "$ACTION" == "approve" ]]; then return 0; fi
 
   if ! command -v tailscale >/dev/null 2>&1; then
-    echo "Error: Tailscale is not installed."
-    echo "  Install it: https://tailscale.com/download/linux"
-    exit 1
+    echo "Tailscale is not installed. Installing..."
+    curl -fsSL https://tailscale.com/install.sh | sh
+    if ! command -v tailscale >/dev/null 2>&1; then
+      echo "Error: Tailscale installation failed."
+      echo "  Install manually: https://tailscale.com/download/linux"
+      exit 1
+    fi
+    echo "Tailscale installed successfully."
   fi
 
   if ! tailscale status >/dev/null 2>&1; then
