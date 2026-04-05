@@ -123,6 +123,15 @@ CONTAINER="openclaw${N}-gateway"
 check_prerequisites() {
   install_jq
 
+  # Verify Docker daemon is reachable (catches missing docker group membership)
+  if ! docker info >/dev/null 2>&1; then
+    echo "Error: cannot connect to the Docker daemon."
+    echo "If Docker is running, add your user to the docker group:"
+    echo "  sudo usermod -aG docker \$USER"
+    echo "Then log out and back in (or run: newgrp docker)."
+    exit 1
+  fi
+
   if ! sudo test -f "$CONFIG"; then
     echo "Error: Instance #$N does not exist ($CONFIG not found)."
     echo "  Create it first: openclaw-new $N"

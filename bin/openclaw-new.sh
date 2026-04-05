@@ -136,6 +136,15 @@ fi
 need_cmd docker
 need_cmd sed
 
+# Verify Docker daemon is reachable (catches missing docker group membership)
+if ! docker info >/dev/null 2>&1; then
+  echo "Error: cannot connect to the Docker daemon."
+  echo "If Docker is running, add your user to the docker group:"
+  echo "  sudo usermod -aG docker \$USER"
+  echo "Then log out and back in (or run: newgrp docker)."
+  exit 1
+fi
+
 # Prefer docker compose plugin; fallback to docker-compose if user has legacy
 COMPOSE_BIN="docker compose"
 if ! docker compose version >/dev/null 2>&1; then
