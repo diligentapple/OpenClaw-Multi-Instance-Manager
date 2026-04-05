@@ -70,21 +70,23 @@ if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   echo "Restarting gateway..."
   docker restart "$CONTAINER" >/dev/null 2>&1
 
-  # 7. Verify health via Docker's built-in healthcheck (runs inside the
-  #    container, so it works even when the gateway binds to loopback).
+  # 7. Verify health via direct HTTP check; fall back to in-container check
+  #    when the gateway binds to loopback.
+  API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | awk -F: '{print $NF}' || true)
+  : "${API_PORT:=18789}"
   healthy=false
-  for i in $(seq 1 15); do
-    health=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "starting")
-    if [[ "$health" == "healthy" ]]; then
+  for i in $(seq 1 30); do
+    if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1 \
+       || docker exec "$CONTAINER" node -e "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
       healthy=true
       break
     fi
-    sleep 2
+    sleep 1
   done
   if $healthy; then
     echo "Instance #$N updated and healthy."
   else
-    echo "Instance #$N updated but health check failed (status: $health)."
+    echo "Instance #$N updated but health check failed."
     echo "  Check logs: openclaw-logs $N --tail 20"
   fi
 else

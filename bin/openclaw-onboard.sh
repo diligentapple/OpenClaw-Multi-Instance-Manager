@@ -61,16 +61,25 @@ fi
 # Wait for the container to come back up and respond.
 # Re-query docker port each iteration because after force-recreate the
 # container needs a moment before port mappings are available.
-for i in $(seq 1 20); do
-  sleep 1
-  health=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "starting")
-  if [[ "$health" == "healthy" ]]; then
+API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | awk -F: '{print $NF}' || true)
+if [[ -z "${API_PORT:-}" ]]; then
+  API_PORT=$(docker inspect "$CONTAINER" \
+    --format='{{range $p, $b := .NetworkSettings.Ports}}{{if eq $p "18789/tcp"}}{{(index $b 0).HostPort}}{{end}}{{end}}' 2>/dev/null || true)
+fi
+: "${API_PORT:=18789}"
+
+for i in $(seq 1 30); do
+  # Try host-side HTTP check first; fall back to in-container check
+  # (needed when gateway binds to loopback — host can't reach container's 127.0.0.1)
+  if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1 \
+     || docker exec "$CONTAINER" node -e "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
     echo "Gateway is up."
     break
   fi
-  if [[ "$i" -eq 20 ]]; then
-    echo "Warning: gateway not responding after 20s. Check: openclaw-logs $N --tail 20"
+  if [[ "$i" -eq 30 ]]; then
+    echo "Warning: gateway not responding after 30s. Check: openclaw-logs $N --tail 20"
   fi
+  sleep 1
 done
 
 # Always enable insecure auth so HTTP fallback URLs work without HTTPS

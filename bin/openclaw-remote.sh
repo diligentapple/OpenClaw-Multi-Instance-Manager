@@ -493,18 +493,16 @@ restart_and_wait() {
   fi
 
   echo "Waiting for gateway to start..."
-  local i health
+  local i
   for i in $(seq 1 30); do
-    health=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "starting")
-    if [[ "$health" == "healthy" ]]; then
+    # Try a direct HTTP check first (faster than waiting for Docker healthcheck)
+    if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1; then
       echo "Gateway is up (port $API_PORT)."
       return 0
     fi
-    if [[ "$i" -eq 30 ]]; then
-      echo "Warning: gateway not responding after 30s. Check: openclaw-logs $N --tail 20"
-    fi
     sleep 1
   done
+  echo "Warning: gateway not responding after 30s. Check: openclaw-logs $N --tail 20"
 }
 
 # ---------------------------------------------------------------------------
