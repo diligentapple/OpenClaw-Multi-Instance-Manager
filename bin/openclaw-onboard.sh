@@ -68,7 +68,7 @@ if [[ -z "${API_PORT:-}" ]]; then
 fi
 : "${API_PORT:=18789}"
 
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   # Try host-side HTTP check first; fall back to in-container check
   # (needed when gateway binds to loopback — host can't reach container's 127.0.0.1)
   if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1 \
@@ -76,10 +76,10 @@ for i in $(seq 1 30); do
     echo "Gateway is up."
     break
   fi
-  if [[ "$i" -eq 30 ]]; then
-    echo "Warning: gateway not responding after 30s. Check: openclaw-logs $N --tail 20"
+  if [[ "$i" -eq 60 ]]; then
+    echo "Warning: gateway not responding after 120s. Check: openclaw-logs $N --tail 20"
   fi
-  sleep 1
+  sleep 2
 done
 
 # Always enable insecure auth so HTTP fallback URLs work without HTTPS

@@ -75,13 +75,13 @@ if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | awk -F: '{print $NF}' || true)
   : "${API_PORT:=18789}"
   healthy=false
-  for i in $(seq 1 30); do
+  for i in $(seq 1 60); do
     if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1 \
        || docker exec "$CONTAINER" node -e "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
       healthy=true
       break
     fi
-    sleep 1
+    sleep 2
   done
   if $healthy; then
     echo "Instance #$N updated and healthy."

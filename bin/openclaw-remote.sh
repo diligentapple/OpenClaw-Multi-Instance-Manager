@@ -492,17 +492,19 @@ restart_and_wait() {
     docker restart "$CONTAINER" >/dev/null
   fi
 
-  echo "Waiting for gateway to start..."
+  echo "Waiting for gateway to start (may take up to 60s)..."
   local i
-  for i in $(seq 1 30); do
-    # Try a direct HTTP check first (faster than waiting for Docker healthcheck)
-    if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1; then
+  for i in $(seq 1 60); do
+    # Try host-side HTTP first; fall back to in-container check
+    # (needed when gateway binds to loopback — host can't reach container's 127.0.0.1)
+    if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1 \
+       || docker exec "$CONTAINER" node -e "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
       echo "Gateway is up (port $API_PORT)."
       return 0
     fi
-    sleep 1
+    sleep 2
   done
-  echo "Warning: gateway not responding after 30s. Check: openclaw-logs $N --tail 20"
+  echo "Warning: gateway not responding after 120s. Check: openclaw-logs $N --tail 20"
 }
 
 # ---------------------------------------------------------------------------
