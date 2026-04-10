@@ -47,11 +47,16 @@ install_jq() {
   fi
 }
 
-restore_ownership() {
-  local file="$1" owner="$2"
-  sudo chown "$owner" "$file"
+# The OpenClaw gateway process inside the container runs as uid 1000 (node),
+# even though the container itself is launched as root.  If openclaw.json is
+# owned by anyone else (e.g. host user via the SFTP-friendly chown in
+# openclaw-new, or root from a prior bad write) the gateway can't read it and
+# fails to start.  Force 1000:1000 on the whole data dir after every edit so
+# the next restart is guaranteed to come up cleanly.
+ensure_container_ownership() {
+  sudo chown -R 1000:1000 "$DATA_DIR"
   if command -v restorecon >/dev/null 2>&1; then
-    sudo restorecon "$file" 2>/dev/null || true
+    sudo restorecon -R "$DATA_DIR" 2>/dev/null || true
   fi
 }
 
@@ -224,8 +229,6 @@ get_tailscale_info() {
 
 edit_config_enable() {
   local config="$CONFIG"
-  local owner
-  owner=$(sudo stat -c '%u:%g' "$config")
 
   sudo cp "$config" "${config}.bak"
 
@@ -279,7 +282,7 @@ edit_config_enable() {
   fi
 
   sudo mv "$tmp" "$config"
-  restore_ownership "$config" "$owner"
+  ensure_container_ownership
   trap - EXIT
 
   # The container command uses --bind ${OPENCLAW_GATEWAY_BIND:-loopback} from
@@ -299,8 +302,6 @@ edit_config_enable() {
 
 edit_config_disable() {
   local config="$CONFIG"
-  local owner
-  owner=$(sudo stat -c '%u:%g' "$config")
 
   sudo cp "$config" "${config}.bak"
 
@@ -322,7 +323,7 @@ edit_config_disable() {
   fi
 
   sudo mv "$tmp" "$config"
-  restore_ownership "$config" "$owner"
+  ensure_container_ownership
   trap - EXIT
 
   # Revert .env so the container command matches the JSON config
