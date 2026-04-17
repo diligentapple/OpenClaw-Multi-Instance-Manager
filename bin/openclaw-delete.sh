@@ -78,38 +78,82 @@ delete_instance() {
   local INSTANCE_DIR="${HOME_DIR}/openclaw${N}"
   local DATA_DIR="${HOME_DIR}/.openclaw${N}"
   local CONTAINER="openclaw${N}-gateway"
+  local PROJECT="openclaw${N}"
 
-  # Clean up tailscale serve for this instance's API port
+  # Tailscale serve cleanup — try live docker port, then compose file
   if command -v tailscale >/dev/null 2>&1; then
+    local API_PORT=""
     API_PORT=$(docker port "$CONTAINER" 18789/tcp 2>/dev/null | head -1 | awk -F: '{print $NF}' || echo "")
-    if [[ -z "${API_PORT:-}" ]]; then
+    if [[ -z "$API_PORT" ]]; then
       API_PORT=$(grep -oP '"\K[0-9]+(?=:18789")' "${INSTANCE_DIR}/docker-compose.yml" 2>/dev/null || echo "")
     fi
-    if [[ -n "${API_PORT:-}" ]]; then
+    if [[ -n "$API_PORT" ]]; then
       sudo tailscale serve --https="$API_PORT" off 2>/dev/null || true
     fi
   fi
 
-  # Prefer compose down if compose file exists
+  # Stop + remove container. Try compose first (cleanest — also removes
+  # compose-managed networks and volumes), then force-remove as fallback in
+  # case compose state is corrupt or the container was created outside compose.
   if [[ -f "${INSTANCE_DIR}/docker-compose.yml" ]]; then
-    $COMPOSE_BIN -f "${INSTANCE_DIR}/docker-compose.yml" down -v || true
-  else
-    docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+    $COMPOSE_BIN -f "${INSTANCE_DIR}/docker-compose.yml" down -v --remove-orphans --timeout 10 >/dev/null 2>&1 || true
+  fi
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+
+  # Remove any orphan containers/networks that carry this project's label.
+  # Belt-and-suspenders: compose down above usually handles these, but a
+  # corrupt compose file or manual rename would leave them behind.
+  local orphan_cids
+  orphan_cids=$(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}" 2>/dev/null || true)
+  if [[ -n "$orphan_cids" ]]; then
+    docker rm -f $orphan_cids >/dev/null 2>&1 || true
+  fi
+  local orphan_nets
+  orphan_nets=$(docker network ls --format '{{.Name}}' 2>/dev/null \
+    | grep -E "^${PROJECT}(_|$)" || true)
+  if [[ -n "$orphan_nets" ]]; then
+    while IFS= read -r net; do
+      [[ -n "$net" ]] && docker network rm "$net" >/dev/null 2>&1 || true
+    done <<< "$orphan_nets"
   fi
 
-  # Data dir may contain files owned by UID 1000 (container's node user).
-  # Try docker first (handles uid 1000 files), fall back to sudo rm.
-  if sudo test -d "$DATA_DIR"; then
-    docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/cleanup" ghcr.io/openclaw/openclaw:latest -c 'rm -rf /cleanup/*' 2>/dev/null \
-      || sudo rm -rf "${DATA_DIR:?}"/* 2>/dev/null || true
+  # Remove data + instance dirs. sudo rm handles files owned by any uid
+  # (root, 1000, or host user) and matches hidden files/dirs.
+  if [[ -e "$DATA_DIR" ]] || sudo test -e "$DATA_DIR"; then
+    sudo rm -rf "$DATA_DIR" 2>/dev/null || true
   fi
-  rm -rf "${DATA_DIR}" "${INSTANCE_DIR}" 2>/dev/null \
-    || sudo rm -rf "${DATA_DIR}" "${INSTANCE_DIR}" 2>/dev/null || true
+  if [[ -e "$INSTANCE_DIR" ]]; then
+    sudo rm -rf "$INSTANCE_DIR" 2>/dev/null || true
+  fi
 
-  # Remove shortcut symlink if it exists
-  SHORTCUT="/usr/local/bin/openclaw${N}"
-  if [[ -L "$SHORTCUT" ]]; then
+  # Remove shortcut symlink
+  local SHORTCUT="/usr/local/bin/openclaw${N}"
+  if [[ -L "$SHORTCUT" || -e "$SHORTCUT" ]]; then
     rm -f "$SHORTCUT" 2>/dev/null || sudo rm -f "$SHORTCUT" 2>/dev/null || true
+  fi
+
+  # Verify everything is actually gone so the next openclaw-new starts clean
+  local issues=()
+  if [[ -e "$INSTANCE_DIR" ]] || sudo test -e "$INSTANCE_DIR"; then
+    issues+=("$INSTANCE_DIR still exists")
+  fi
+  if [[ -e "$DATA_DIR" ]] || sudo test -e "$DATA_DIR"; then
+    issues+=("$DATA_DIR still exists")
+  fi
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
+    issues+=("container $CONTAINER still exists")
+  fi
+  if docker network ls --format '{{.Name}}' 2>/dev/null | grep -qE "^${PROJECT}(_|$)"; then
+    issues+=("docker network for ${PROJECT} still exists")
+  fi
+  if [[ -e "$SHORTCUT" || -L "$SHORTCUT" ]]; then
+    issues+=("$SHORTCUT still exists")
+  fi
+
+  if [[ ${#issues[@]} -gt 0 ]]; then
+    echo "Warning: instance #$N cleanup incomplete:"
+    printf '  - %s\n' "${issues[@]}"
+    return 1
   fi
 
   echo "Deleted instance #$N"
