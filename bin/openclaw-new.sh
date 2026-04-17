@@ -337,6 +337,19 @@ create_instance() {
   docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/setup" "$OPENCLAW_IMAGE" \
     -c 'mkdir -p /setup/workspace /setup/identity && chown -R 1000:1000 /setup'
 
+  # Grant the host user persistent rwX access to DATA_DIR via POSIX ACL,
+  # so VS Code Remote / WinSCP / SFTP can read and edit files even though
+  # the root-running gateway keeps writing them as root:root 0600.  The
+  # default ACL (-d) is inherited by files the container creates later.
+  local host_user="${SUDO_USER:-${USER:-$(id -un)}}"
+  if command -v setfacl >/dev/null 2>&1; then
+    sudo setfacl -R  -m "u:${host_user}:rwX" "$DATA_DIR" 2>/dev/null || true
+    sudo setfacl -R -d -m "u:${host_user}:rwX" "$DATA_DIR" 2>/dev/null || true
+  else
+    echo "Note: setfacl not found; install 'acl' to edit data files over SFTP/VS Code."
+    echo "      Ubuntu/Debian: sudo apt-get install -y acl"
+  fi
+
   render_template "$TEMPLATE" "${INSTANCE_DIR}/docker-compose.yml"
 
   # Generate per-instance .env file for docker compose

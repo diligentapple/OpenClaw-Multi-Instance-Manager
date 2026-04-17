@@ -34,6 +34,18 @@ if [[ -n "${SUDO_USER:-}" ]] && ! id -nG "$SUDO_USER" 2>/dev/null | grep -qw doc
   echo "Added $SUDO_USER to the docker group. Log out and back in (or run 'newgrp docker') for this to take effect."
 fi
 
+# Install ACL tools so openclaw-new can grant the host user seamless edit
+# access to each instance's data dir (for VS Code Remote / WinSCP / SFTP).
+if ! command -v setfacl >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y -qq acl >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q acl >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q acl >/dev/null 2>&1 || true
+  fi
+fi
+
 mkdir -p "$BIN_DIR" "$SHARE_DIR/templates" "$SHARE_DIR/presets"
 
 install -m 0755 "${REPO_DIR}/bin/openclaw-new.sh"    "${BIN_DIR}/openclaw-new"
