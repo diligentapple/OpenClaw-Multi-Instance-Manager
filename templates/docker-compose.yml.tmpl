@@ -1,6 +1,6 @@
 services:
   openclaw-gateway:
-    image: ghcr.io/openclaw/openclaw:latest
+    image: {{IMAGE}}
     container_name: openclaw{{N}}-gateway
     user: root
     restart: unless-stopped

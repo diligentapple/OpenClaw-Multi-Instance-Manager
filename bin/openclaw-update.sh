@@ -36,12 +36,27 @@ if sudo test -f "$CONFIG"; then
   echo "Config backed up to $backup"
 fi
 
-# 2. Pull latest image
+# 2. Pull upstream + rebuild derived image (with lsof baked in)
+UPSTREAM_IMAGE="ghcr.io/openclaw/openclaw:latest"
+DERIVED_IMAGE="openclaw-local:latest"
+SHARE_DIR="${OPENCLAW_MGR_SHARE:-/usr/local/share/openclaw-manager}"
+DOCKERFILE="${SHARE_DIR}/templates/openclaw-local.Dockerfile"
+OPENCLAW_IMAGE="$UPSTREAM_IMAGE"
+
 echo "Pulling latest OpenClaw image..."
-docker pull ghcr.io/openclaw/openclaw:latest
+docker pull "$UPSTREAM_IMAGE"
+
+if [[ -f "$DOCKERFILE" ]]; then
+  echo "Rebuilding $DERIVED_IMAGE..."
+  if docker build -t "$DERIVED_IMAGE" -f "$DOCKERFILE" "$(dirname "$DOCKERFILE")" >/dev/null; then
+    OPENCLAW_IMAGE="$DERIVED_IMAGE"
+  else
+    echo "Warning: build failed; falling back to upstream image."
+  fi
+fi
 
 # 2b. Re-render docker-compose template (picks up template improvements)
-TEMPLATE="${OPENCLAW_MGR_TEMPLATE:-/usr/local/share/openclaw-manager/templates/docker-compose.yml.tmpl}"
+TEMPLATE="${OPENCLAW_MGR_TEMPLATE:-${SHARE_DIR}/templates/docker-compose.yml.tmpl}"
 if [[ -f "$TEMPLATE" ]]; then
   API_PORT=$(grep -oP '"\K\d+(?=:18789")' "$COMPOSE_FILE" | head -1)
   WS_PORT=$(grep -oP '"\K\d+(?=:18790")' "$COMPOSE_FILE" | head -1)
@@ -55,6 +70,7 @@ if [[ -f "$TEMPLATE" ]]; then
       -e "s/{{WS_PORT}}/${WS_PORT}/g" \
       -e "s#{{DATA_DIR}}#${DATA_DIR}#g" \
       -e "s#{{TZ}}#${TZ}#g" \
+      -e "s#{{IMAGE}}#${OPENCLAW_IMAGE}#g" \
       "$TEMPLATE" > "$COMPOSE_FILE"
   fi
 fi

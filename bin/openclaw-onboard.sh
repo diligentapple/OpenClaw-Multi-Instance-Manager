@@ -50,23 +50,12 @@ docker run --rm -it \
   "$IMAGE" \
   node dist/index.js onboard --mode local
 
-# Restart the gateway so it picks up the new config written by the wizard.
-# IMPORTANT: use docker compose up (not docker restart) so .env is re-read.
+# The wizard only writes openclaw.json in the bind-mounted data dir; .env
+# values are unchanged, so docker restart is sufficient and much faster than
+# --force-recreate (preserves the container's writable layer, avoiding the
+# apt-get install tax on cold start).
 echo "Restarting gateway to apply new configuration..."
-COMPOSE_FILE="${HOME_DIR}/openclaw${N}/docker-compose.yml"
-COMPOSE_BIN="docker compose"
-if ! docker compose version >/dev/null 2>&1; then
-  if command -v docker-compose >/dev/null 2>&1; then
-    COMPOSE_BIN="docker-compose"
-  fi
-fi
-
-if [[ -f "$COMPOSE_FILE" ]]; then
-  $COMPOSE_BIN --project-directory "${HOME_DIR}/openclaw${N}" \
-    -f "$COMPOSE_FILE" up -d --force-recreate >/dev/null 2>&1 || true
-else
-  docker restart "$CONTAINER" >/dev/null 2>&1 || true
-fi
+docker restart "$CONTAINER" >/dev/null 2>&1 || true
 
 # Wait for the container to come back up and respond.
 # Re-query docker port each iteration because after force-recreate the

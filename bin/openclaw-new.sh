@@ -60,6 +60,7 @@ render_template() {
     -e "s/{{WS_PORT}}/${WS_PORT}/g" \
     -e "s#{{DATA_DIR}}#${DATA_DIR}#g" \
     -e "s#{{TZ}}#${TZ}#g" \
+    -e "s#{{IMAGE}}#${OPENCLAW_IMAGE}#g" \
     "$tmpl" > "$out"
 }
 
@@ -154,25 +155,52 @@ fi
 
 HOME_DIR="${HOME:-/root}"
 TZ="${TZ:-Asia/Tokyo}"
-TEMPLATE="${OPENCLAW_MGR_TEMPLATE:-/usr/local/share/openclaw-manager/templates/docker-compose.yml.tmpl}"
+SHARE_DIR="${OPENCLAW_MGR_SHARE:-/usr/local/share/openclaw-manager}"
+TEMPLATE="${OPENCLAW_MGR_TEMPLATE:-${SHARE_DIR}/templates/docker-compose.yml.tmpl}"
 
 if [[ ! -f "$TEMPLATE" ]]; then
   echo "Template not found: $TEMPLATE"
   exit 1
 fi
 
-OPENCLAW_IMAGE="ghcr.io/openclaw/openclaw:latest"
+# Use a locally-derived image with lsof pre-installed so container recreate
+# skips the ~10s apt-get install tax. Fall back to upstream if build fails.
+UPSTREAM_IMAGE="ghcr.io/openclaw/openclaw:latest"
+DERIVED_IMAGE="openclaw-local:latest"
+DOCKERFILE="${SHARE_DIR}/templates/openclaw-local.Dockerfile"
 
-if [[ "$PULL" == true ]]; then
-  echo "Pulling latest OpenClaw image..."
-  docker pull "$OPENCLAW_IMAGE"
-fi
+ensure_image() {
+  local force_rebuild="${1:-false}"
+
+  if [[ "$force_rebuild" != true ]] && docker image inspect "$DERIVED_IMAGE" >/dev/null 2>&1; then
+    OPENCLAW_IMAGE="$DERIVED_IMAGE"
+    return
+  fi
+
+  if [[ ! -f "$DOCKERFILE" ]]; then
+    echo "Warning: $DOCKERFILE missing; using upstream image."
+    OPENCLAW_IMAGE="$UPSTREAM_IMAGE"
+    if [[ "$force_rebuild" == true ]]; then
+      docker pull "$UPSTREAM_IMAGE"
+    fi
+    return
+  fi
+
+  echo "Building $DERIVED_IMAGE (upstream + lsof)..."
+  docker pull "$UPSTREAM_IMAGE"
+  if docker build -t "$DERIVED_IMAGE" -f "$DOCKERFILE" "$(dirname "$DOCKERFILE")" >/dev/null; then
+    OPENCLAW_IMAGE="$DERIVED_IMAGE"
+  else
+    echo "Warning: docker build failed; using upstream image."
+    OPENCLAW_IMAGE="$UPSTREAM_IMAGE"
+  fi
+}
+
+ensure_image "$PULL"
 
 # ---------------------------------------------------------------------------
 # Apply a preset: render template and write openclaw.json directly
 # ---------------------------------------------------------------------------
-
-SHARE_DIR="${OPENCLAW_MGR_SHARE:-/usr/local/share/openclaw-manager}"
 
 gen_token() {
   # 24-byte hex token (48 chars)

@@ -50,6 +50,21 @@ install -m 0755 "${REPO_DIR}/bin/openclaw-preset.sh"  "${BIN_DIR}/openclaw-prese
 install -m 0755 "${REPO_DIR}/bin/openclaw-watchdog.sh" "${BIN_DIR}/openclaw-watchdog"
 
 install -m 0644 "${REPO_DIR}/templates/docker-compose.yml.tmpl" "${SHARE_DIR}/templates/docker-compose.yml.tmpl"
+install -m 0644 "${REPO_DIR}/templates/openclaw-local.Dockerfile" "${SHARE_DIR}/templates/openclaw-local.Dockerfile"
+
+# Build the derived image (upstream + lsof) once so container recreate is fast.
+# Best-effort: if Docker isn't ready yet, openclaw-new/update will build on demand.
+if docker info >/dev/null 2>&1; then
+  echo "Building openclaw-local:latest (upstream + lsof)..."
+  docker pull ghcr.io/openclaw/openclaw:latest >/dev/null 2>&1 || true
+  docker build -t openclaw-local:latest \
+    -f "${SHARE_DIR}/templates/openclaw-local.Dockerfile" \
+    "${SHARE_DIR}/templates" >/dev/null 2>&1 \
+    && echo "  Built openclaw-local:latest." \
+    || echo "  Warning: build failed; openclaw-new will retry on first use."
+else
+  echo "Note: Docker daemon not reachable; openclaw-local image will build on first openclaw-new run."
+fi
 
 # Install preset files
 for preset in "${REPO_DIR}/presets/"*.json; do
