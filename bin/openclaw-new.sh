@@ -319,9 +319,12 @@ OPENCLAW_GATEWAY_TOKEN=${gw_token}
 OPENCLAW_GATEWAY_BIND=loopback
 ENVEOF
 
-  # Make data dir owned by the host user so it's editable via WinSCP / SFTP
-  sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR"
-  chmod -R u+rwX "$DATA_DIR"
+  # Container runs as uid 1000 (node) and needs to own the data dir.
+  # Give the host user's primary group group-level rwX (for WinSCP/SFTP editing)
+  # and setgid on directories so new files inherit the group.
+  sudo chown -R "1000:$(id -g)" "$DATA_DIR"
+  sudo chmod -R u+rwX,g+rwX "$DATA_DIR"
+  sudo find "$DATA_DIR" -type d -exec chmod g+s {} \;
 
   echo "Bringing up instance #$N..."
   $COMPOSE_BIN -f "${INSTANCE_DIR}/docker-compose.yml" up -d
