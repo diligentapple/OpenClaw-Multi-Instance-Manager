@@ -41,6 +41,7 @@ echo "Running onboarding for instance #$N..."
 # killing the interactive exec session (the root cause of the "exits after
 # channel selection" bug).
 docker run --rm -it \
+  --user root \
   -e HOME=/home/node \
   -e TERM=xterm-256color \
   -e NPM_CONFIG_PREFIX=/home/node/.npm-global \
