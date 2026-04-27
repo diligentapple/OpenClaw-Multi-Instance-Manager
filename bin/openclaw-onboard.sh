@@ -36,6 +36,18 @@ IMAGE=$(docker inspect --format '{{.Config.Image}}' "$CONTAINER" 2>/dev/null || 
 
 echo "Running onboarding for instance #$N..."
 
+# The gateway runs as root (user: root in compose) and writes files owned by
+# root:root.  The wizard process drops to uid 1000 internally, so it cannot
+# delete or overwrite root-owned files during a Reset.  Fix ownership first.
+sudo chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
+
+# Remove any auto-generated stub config so the wizard starts completely fresh.
+# The gateway writes a minimal openclaw.json on first start (to persist the
+# auth token), which would otherwise trigger "Existing config detected" in the
+# wizard even for brand-new instances.  The gateway tolerates the missing file
+# via --allow-unconfigured and will re-read the new config after restart.
+sudo rm -f "${DATA_DIR}/openclaw.json"
+
 # Run onboarding in a *separate* one-off container that shares the data volume.
 # This avoids the gateway's file-watcher restarting the container mid-wizard and
 # killing the interactive exec session (the root cause of the "exits after
