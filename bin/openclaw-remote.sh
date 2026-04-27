@@ -533,7 +533,7 @@ approve_devices() {
 
   # Step 1: Get pending request IDs via the CLI
   local cli_output
-  cli_output=$(docker exec "$CONTAINER" node /app/dist/index.js devices list 2>&1) || true
+  cli_output=$(docker exec "$CONTAINER" node /app/openclaw.mjs devices list 2>&1) || true
 
   # Extract request IDs from the "Pending" section of CLI output.
   # The table has columns: Request | Device | Role | IP | Age | Flags
@@ -546,7 +546,7 @@ approve_devices() {
   if [[ -z "$request_ids" ]]; then
     echo "No pending device pairing requests."
     echo ""
-    echo "  Checked via: docker exec $CONTAINER node /app/dist/index.js devices list"
+    echo "  Checked via: docker exec $CONTAINER node /app/openclaw.mjs devices list"
     return 0
   fi
 
@@ -570,11 +570,11 @@ approve_devices() {
   local approved=0 failed=0
   while read -r rid; do
     echo "Approving $rid ..."
-    if docker exec "$CONTAINER" node /app/dist/index.js devices approve "$rid" 2>&1; then
+    if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
       ((approved++)) || true
     else
       echo "  Warning: 'devices approve' failed for $rid, trying 'pairing approve' ..."
-      if docker exec "$CONTAINER" node /app/dist/index.js pairing approve "$rid" 2>&1; then
+      if docker exec "$CONTAINER" node /app/openclaw.mjs pairing approve "$rid" 2>&1; then
         ((approved++)) || true
       else
         echo "  Error: Could not approve $rid"
@@ -589,8 +589,8 @@ approve_devices() {
     echo ""
     echo "  You can try approving manually inside the container:"
     echo "    docker exec -it $CONTAINER bash"
-    echo "    node /app/dist/index.js devices list"
-    echo "    node /app/dist/index.js devices approve <requestId>"
+    echo "    node /app/openclaw.mjs devices list"
+    echo "    node /app/openclaw.mjs devices approve <requestId>"
     return 1
   else
     echo "Approved $approved device(s)."
@@ -646,7 +646,7 @@ print_status() {
   echo "Devices:"
   # Use the OpenClaw CLI for accurate device counts
   local devices_output
-  devices_output=$(docker exec "$CONTAINER" node /app/dist/index.js devices list 2>&1) || true
+  devices_output=$(docker exec "$CONTAINER" node /app/openclaw.mjs devices list 2>&1) || true
   local pending_count paired_count
   # Count lines in the Pending and Paired table sections
   pending_count=$(echo "$devices_output" | grep -cP '^│ [0-9a-f]{8}-' || echo "0")
@@ -721,7 +721,7 @@ wait_and_approve() {
 
   while [[ "$elapsed" -lt "$timeout" ]]; do
     local cli_output
-    cli_output=$(docker exec "$CONTAINER" node /app/dist/index.js devices list 2>&1) || true
+    cli_output=$(docker exec "$CONTAINER" node /app/openclaw.mjs devices list 2>&1) || true
 
     local request_ids
     request_ids=$(echo "$cli_output" | \
@@ -736,9 +736,9 @@ wait_and_approve() {
 
       local approved=0
       while read -r rid; do
-        if docker exec "$CONTAINER" node /app/dist/index.js devices approve "$rid" 2>&1; then
+        if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
           ((approved++)) || true
-        elif docker exec "$CONTAINER" node /app/dist/index.js pairing approve "$rid" 2>&1; then
+        elif docker exec "$CONTAINER" node /app/openclaw.mjs pairing approve "$rid" 2>&1; then
           ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"

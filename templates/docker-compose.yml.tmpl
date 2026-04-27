@@ -24,7 +24,7 @@ services:
       [
         "sh",
         "-c",
-        "command -v lsof >/dev/null 2>&1 || { apt-get update -qq && apt-get install -yqq lsof >/dev/null 2>&1; }; exec node dist/index.js gateway --bind ${OPENCLAW_GATEWAY_BIND:-loopback} --port 18789 --allow-unconfigured",
+        "command -v lsof >/dev/null 2>&1 || { apt-get update -qq && apt-get install -yqq lsof >/dev/null 2>&1; }; exec node openclaw.mjs gateway --bind ${OPENCLAW_GATEWAY_BIND:-loopback} --port 18789 --allow-unconfigured",
       ]
     healthcheck:
       test:

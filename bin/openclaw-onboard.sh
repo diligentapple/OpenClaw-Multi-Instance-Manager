@@ -48,7 +48,7 @@ docker run --rm -it \
   -e PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   -v "${DATA_DIR}:/home/node/.openclaw" \
   "$IMAGE" \
-  node dist/index.js onboard --mode local
+  node openclaw.mjs onboard --mode local
 
 # The wizard only writes openclaw.json in the bind-mounted data dir; .env
 # values are unchanged, so docker restart is sufficient and much faster than
