@@ -58,6 +58,7 @@ docker run --rm -it \
   -e TERM=xterm-256color \
   -e NPM_CONFIG_PREFIX=/home/node/.npm-global \
   -e PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  -e NODE_OPTIONS="--disable-warning=DEP0040" \
   -v "${DATA_DIR}:/home/node/.openclaw" \
   "$IMAGE" \
   node openclaw.mjs onboard --mode local

@@ -15,7 +15,6 @@ services:
       NODE_OPTIONS: "--disable-warning=DEP0040"
     volumes:
       - "{{DATA_DIR}}:/home/node/.openclaw"
-      - "{{DATA_DIR}}/workspace:/home/node/.openclaw/workspace"
     ports:
       - "{{API_PORT}}:18789"
       - "{{WS_PORT}}:18790"

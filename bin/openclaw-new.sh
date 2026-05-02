@@ -246,8 +246,18 @@ resolve_api_key() {
 apply_preset() {
   local n="$1" api_port="$2" data_dir="$3" preset_file="$4"
   local config="${data_dir}/openclaw.json"
+  local instance_dir="${HOME_DIR}/openclaw${n}"
+  local env_file="${instance_dir}/.env"
+
+  # Use the token already written to .env by create_instance so the container's
+  # OPENCLAW_GATEWAY_TOKEN env var and gateway.auth.token in the JSON always match.
   local token
-  token=$(gen_token)
+  token=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$env_file" 2>/dev/null || true)
+  if [[ -z "$token" ]]; then
+    token=$(gen_token)
+    echo "OPENCLAW_GATEWAY_TOKEN=${token}" >> "$env_file"
+  fi
+
   local timestamp
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
@@ -275,14 +285,13 @@ apply_preset() {
   rm -f "$tmp"
 
   # If the preset sets bind=lan, update the .env so the gateway command matches
-  local instance_dir="${HOME_DIR}/openclaw${n}"
   if grep -q '"bind": "lan"' "$preset_file"; then
-    sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=lan/' "${instance_dir}/.env"
+    sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=lan/' "$env_file"
   fi
 
   # Restart to pick up new config
-  local container="openclaw${n}-gateway"
-  $COMPOSE_BIN -f "${instance_dir}/docker-compose.yml" up -d --force-recreate >/dev/null 2>&1 || true
+  $COMPOSE_BIN --project-directory "$instance_dir" \
+    -f "${instance_dir}/docker-compose.yml" up -d --force-recreate >/dev/null 2>&1 || true
 
   echo "Preset '${PRESET}' applied (token: ${token:0:12}...)"
 }
@@ -361,7 +370,8 @@ OPENCLAW_GATEWAY_BIND=loopback
 ENVEOF
 
   echo "Bringing up instance #$N..."
-  $COMPOSE_BIN -f "${INSTANCE_DIR}/docker-compose.yml" up -d
+  $COMPOSE_BIN --project-directory "$INSTANCE_DIR" \
+    -f "${INSTANCE_DIR}/docker-compose.yml" up -d
 
   # Create shortcut symlink: openclawN -> openclaw-exec
   EXEC_BIN="$(command -v openclaw-exec 2>/dev/null || echo "/usr/local/bin/openclaw-exec")"
