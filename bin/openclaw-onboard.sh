@@ -43,12 +43,27 @@ echo "Running onboarding for instance #$N..."
 # delete or overwrite root-owned files during a Reset.  Fix ownership first.
 sudo chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
 
-# Remove any auto-generated stub config so the wizard starts completely fresh.
-# The gateway writes a minimal openclaw.json on first start (to persist the
-# auth token), which would otherwise trigger "Existing config detected" in the
-# wizard even for brand-new instances.  The gateway tolerates the missing file
-# via --allow-unconfigured and will re-read the new config after restart.
-sudo rm -f "$CONFIG"
+# Check whether openclaw.json is a user-configured file (has channels/auth content)
+# or just the auto-generated stub the gateway writes on first start.
+# - Stub (no user content): delete so the wizard starts completely fresh.
+# - Real config (Telegram tokens, API keys, etc.): keep it.  The wizard will
+#   show "Existing config detected" and re-pair the device while preserving the
+#   user's settings.  This is the correct path for fixing a scope issue without
+#   losing configuration.
+_is_stub=true
+if sudo test -f "$CONFIG"; then
+  _has_channels=$(sudo jq -r 'if (.channels // {} | length) > 0 then "yes" else "no" end' "$CONFIG" 2>/dev/null || echo "no")
+  _has_auth=$(sudo jq -r 'if ((.auth.profiles // {}) | length) > 0 then "yes" else "no" end' "$CONFIG" 2>/dev/null || echo "no")
+  if [[ "$_has_channels" == "yes" || "$_has_auth" == "yes" ]]; then
+    _is_stub=false
+  fi
+fi
+
+if [[ "$_is_stub" == "true" ]]; then
+  sudo rm -f "$CONFIG"
+else
+  echo "Existing config detected (has user settings). Wizard will re-pair without wiping configuration."
+fi
 
 # Ensure the gateway container is running so the wizard can connect to it.
 if [[ "$(docker inspect --format '{{.State.Status}}' "$CONTAINER" 2>/dev/null)" != "running" ]]; then

@@ -543,16 +543,9 @@ _openclaw_list_devices() {
 }
 
 _cli_approve() {
-  # Run 'openclaw devices approve' without the data-volume config file.
-  # Setting HOME to a path with no openclaw.json forces the CLI to fall back
-  # to OPENCLAW_GATEWAY_TOKEN (already set in the container env from
-  # docker-compose), which carries full admin credentials.
   local rid="$1"
-  local _token
-  _token=$(resolve_token "$N")
   docker exec \
-    -e HOME=/tmp \
-    -e OPENCLAW_GATEWAY_TOKEN="${_token}" \
+    -e HOME=/home/node \
     -e "PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     "$CONTAINER" openclaw devices approve "$rid" 2>&1
 }
