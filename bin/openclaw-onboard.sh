@@ -43,11 +43,26 @@ echo "Running onboarding for instance #$N..."
 # delete or overwrite root-owned files during a Reset.  Fix ownership first.
 sudo chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
 
-# Remove any auto-generated stub config so the wizard starts completely fresh.
-# The gateway writes a minimal openclaw.json on first start (to persist the
-# auth token), which would otherwise trigger "Existing config detected" in the
-# wizard even for brand-new instances.  The gateway tolerates the missing file
-# via --allow-unconfigured and will re-read the new config after restart.
+# If a fully-onboarded config exists (wizard.lastRunAt is set), back it up before
+# deleting it.  After the wizard produces a fresh config with correctly-scoped
+# auth, we deep-merge the user's settings (channels, agents, plugins, etc.) back
+# in — so re-running onboarding to fix scope issues doesn't wipe Telegram/API key
+# config.  The wizard's gateway/wizard/meta sections are kept as-is (they carry
+# the new auth token and version info).
+CONFIG_BACKUP=""
+if command -v jq >/dev/null 2>&1 && sudo test -f "$CONFIG"; then
+  _ran_at=$(sudo jq -r '.wizard.lastRunAt // empty' "$CONFIG" 2>/dev/null || true)
+  if [[ -n "$_ran_at" ]]; then
+    CONFIG_BACKUP=$(mktemp)
+    sudo cp "$CONFIG" "$CONFIG_BACKUP"
+    sudo chown "$(id -u):$(id -g)" "$CONFIG_BACKUP"
+    echo "Note: existing config backed up (user settings will be restored after wizard)."
+  fi
+fi
+
+# Remove config so the wizard starts completely fresh and re-pairs the CLI with
+# the correct scopes.  The gateway tolerates the missing file via --allow-unconfigured
+# and will re-read the new config after restart.
 sudo rm -f "$CONFIG"
 
 # Join the gateway's Docker Compose network so the wizard can reach the running
@@ -118,6 +133,32 @@ if sudo test -f "$CONFIG"; then
   else
     rm -f "$_patch_tmp"
   fi
+fi
+
+# Restore user settings from the pre-wizard backup (channels, agents, plugins, etc.)
+# while keeping the wizard's gateway/wizard/meta sections which carry the fresh
+# auth token and version info.  Strategy: deep-merge backup on top of the wizard
+# config (backup wins on shared keys), then force-restore gateway/wizard/meta from
+# the wizard so the new pairing and token values are never overwritten.
+if [[ -n "${CONFIG_BACKUP:-}" ]] && sudo test -f "$CONFIG" && [[ -f "$CONFIG_BACKUP" ]]; then
+  _merge_tmp=$(mktemp)
+  sudo jq -s '
+    (.[0] * .[1])
+    | .gateway = .[0].gateway
+    | .wizard  = .[0].wizard
+    | .meta    = .[0].meta
+  ' "$CONFIG" "$CONFIG_BACKUP" > "$_merge_tmp" 2>/dev/null || true
+
+  if jq empty "$_merge_tmp" 2>/dev/null; then
+    _owner=$(sudo stat -c '%u:%g' "$CONFIG" 2>/dev/null || echo "1000:1000")
+    sudo mv "$_merge_tmp" "$CONFIG"
+    sudo chown "$_owner" "$CONFIG"
+    echo "User settings (channels, agents, plugins) restored from previous config."
+  else
+    rm -f "$_merge_tmp"
+    echo "Note: could not merge previous settings; wizard config used as-is."
+  fi
+  rm -f "$CONFIG_BACKUP"
 fi
 
 # Restart the gateway once with the fully patched config.
