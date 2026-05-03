@@ -48,6 +48,17 @@ sudo chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
 # via --allow-unconfigured and will re-read the new config after restart.
 sudo rm -f "${DATA_DIR}/openclaw.json"
 
+# Join the gateway's Docker Compose network so the wizard can reach the running
+# gateway for its connection-checking step (e.g. generating the Telegram pairing
+# code).  The network is safe to use even when the gateway restarts mid-wizard
+# because compose recreates the container on the same network automatically —
+# the wizard container itself is unaffected.
+COMPOSE_NETWORK="openclaw${N}_default"
+NETWORK_OPT=()
+if docker network inspect "$COMPOSE_NETWORK" >/dev/null 2>&1; then
+  NETWORK_OPT=(--network "$COMPOSE_NETWORK")
+fi
+
 # Run onboarding in a *separate* one-off container that shares the data volume.
 # This avoids the gateway's file-watcher restarting the container mid-wizard and
 # killing the interactive exec session (the root cause of the "exits after
@@ -59,6 +70,7 @@ docker run --rm -it \
   -e NPM_CONFIG_PREFIX=/home/node/.npm-global \
   -e PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   -e NODE_OPTIONS="--disable-warning=DEP0040" \
+  "${NETWORK_OPT[@]}" \
   -v "${DATA_DIR}:/home/node/.openclaw" \
   "$IMAGE" \
   node openclaw.mjs onboard --mode local
@@ -94,6 +106,14 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
+# Follow gateway logs briefly so the user sees any Telegram pairing code emitted
+# on startup.  The wizard's gateway-checking step may also have printed pairing
+# info to the gateway process, which only appears here.
+echo ""
+echo "Gateway startup log (Ctrl-C to stop, or wait ~15s):"
+timeout 15 docker logs --since 5s -f "$CONTAINER" 2>&1 || true
+echo ""
+
 # Always enable insecure auth so HTTP fallback URLs work without HTTPS
 CONFIG="${DATA_DIR}/openclaw.json"
 if sudo test -f "$CONFIG"; then
@@ -106,3 +126,8 @@ if sudo test -f "$CONFIG"; then
     rm -f "$local_tmp"
   fi
 fi
+
+echo "Onboarding complete for instance #$N"
+echo "  Dashboard : http://127.0.0.1:${API_PORT}/"
+echo "  Logs      : openclaw-logs $N"
+echo "  Approve   : openclaw-remote $N --approve"
