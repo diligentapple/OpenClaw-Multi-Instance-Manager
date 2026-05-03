@@ -567,19 +567,23 @@ approve_devices() {
     fi
   fi
 
+  # Resolve the gateway admin token; needed for the --token retry when the CLI
+  # connects without operator.admin scope (the container env has the token but
+  # the CLI WebSocket auth may not pick it up automatically).
+  local gw_token
+  gw_token=$(resolve_token "$N")
+
   local approved=0 failed=0
   while read -r rid; do
     echo "Approving $rid ..."
     if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
       ((approved++)) || true
+    elif [[ -n "$gw_token" ]] && \
+         docker exec "$CONTAINER" node /app/openclaw.mjs devices approve --token "$gw_token" "$rid" 2>&1; then
+      ((approved++)) || true
     else
-      echo "  Warning: 'devices approve' failed for $rid, trying 'pairing approve' ..."
-      if docker exec "$CONTAINER" node /app/openclaw.mjs pairing approve "$rid" 2>&1; then
-        ((approved++)) || true
-      else
-        echo "  Error: Could not approve $rid"
-        ((failed++)) || true
-      fi
+      echo "  Error: Could not approve $rid"
+      ((failed++)) || true
     fi
   done <<< "$request_ids"
 
@@ -735,10 +739,13 @@ wait_and_approve() {
       echo "Found $count pending device(s). Auto-approving..."
 
       local approved=0
+      local gw_token
+      gw_token=$(resolve_token "$N")
       while read -r rid; do
         if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
           ((approved++)) || true
-        elif docker exec "$CONTAINER" node /app/openclaw.mjs pairing approve "$rid" 2>&1; then
+        elif [[ -n "$gw_token" ]] && \
+             docker exec "$CONTAINER" node /app/openclaw.mjs devices approve --token "$gw_token" "$rid" 2>&1; then
           ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"
