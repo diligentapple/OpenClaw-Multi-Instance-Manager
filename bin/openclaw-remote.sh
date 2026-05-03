@@ -542,55 +542,19 @@ _openclaw_list_devices() {
     "$CONTAINER" openclaw devices list 2>&1
 }
 
-_gateway_approve() {
-  # Approve a pending device via the gateway HTTP REST API using the master
-  # token.  This bypasses the WebSocket client and the device-registry scope
-  # check entirely — the gateway token is accepted as admin auth on HTTP routes.
+_cli_approve() {
+  # Run 'openclaw devices approve' without the data-volume config file.
+  # Setting HOME to a path with no openclaw.json forces the CLI to fall back
+  # to OPENCLAW_GATEWAY_TOKEN (already set in the container env from
+  # docker-compose), which carries full admin credentials.
   local rid="$1"
-  local _token _base _body _status
+  local _token
   _token=$(resolve_token "$N")
-  _base="http://127.0.0.1:${API_PORT}"
-
-  # Fetch the dashboard JS bundle and extract API route for device approval.
-  # The dashboard JS makes the same API call we need here.
-  local _approve_path=""
-  local _html _js_path _js
-  _html=$(curl -sf --max-time 5 "${_base}/" 2>/dev/null) || true
-  _js_path=$(echo "$_html" | grep -oP 'src="([^"]+\.js)"' | grep -oP '"[^"]+"' | tr -d '"' | head -1)
-  if [[ -n "$_js_path" ]]; then
-    _js=$(curl -sf --max-time 15 "${_base}${_js_path}" 2>/dev/null) || true
-    _approve_path=$(echo "$_js" | grep -oP '"[^"]*devices[^"]*approve[^"]*"' | tr -d '"' | head -1)
-    if [[ -z "$_approve_path" ]]; then
-      _approve_path=$(echo "$_js" | grep -oP '"[^"]*nodes[^"]*approve[^"]*"' | tr -d '"' | head -1)
-    fi
-  fi
-
-  # Try discovered path first, then common fallbacks
-  local _path
-  for _path in \
-    "${_approve_path}" \
-    "/api/v1/devices/${rid}/approve" \
-    "/api/devices/${rid}/approve" \
-    "/api/v1/nodes/${rid}/approve" \
-    "/api/nodes/${rid}/approve"; do
-
-    [[ -z "$_path" ]] && continue
-
-    _body=$(curl -s --max-time 10 -X POST \
-      -H "Authorization: Bearer ${_token}" \
-      -H "Content-Type: application/json" \
-      -w "\n__HTTP_STATUS__%{http_code}" \
-      "${_base}${_path/${rid}/$rid}" 2>/dev/null) || true
-    _status=$(echo "$_body" | grep -oP '(?<=__HTTP_STATUS__)\d+')
-
-    if [[ "$_status" =~ ^2 ]]; then
-      return 0
-    fi
-
-    echo "  [debug] POST ${_path}: HTTP ${_status:-000}"
-    echo "$_body" | grep -v '__HTTP_STATUS__' | head -2 | sed 's/^/  [debug] /'
-  done
-  return 1
+  docker exec \
+    -e HOME=/tmp \
+    -e OPENCLAW_GATEWAY_TOKEN="${_token}" \
+    -e "PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    "$CONTAINER" openclaw devices approve "$rid" 2>&1
 }
 
 approve_devices() {
@@ -627,7 +591,7 @@ approve_devices() {
   local approved=0 failed=0
   while read -r rid; do
     echo "Approving $rid ..."
-    if _gateway_approve "$rid"; then
+    if _cli_approve "$rid"; then
       ((approved++)) || true
     else
       echo "  Error: Could not approve $rid"
@@ -782,7 +746,7 @@ wait_and_approve() {
 
       local approved=0
       while read -r rid; do
-        if _gateway_approve "$rid"; then
+        if _cli_approve "$rid"; then
           ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"
