@@ -534,22 +534,30 @@ restart_and_wait() {
 # Approve devices
 # ---------------------------------------------------------------------------
 
-_openclaw_exec() {
-  # Run 'openclaw <args>' inside the container.
-  # HOME=/home/node  — CLI reads the data-volume config (openclaw.json).
-  # PATH             — ensures the npm-global openclaw binary is found.
-  # OPENCLAW_GATEWAY_TOKEN is already in the container env from docker-compose
-  # and is inherited by docker exec; the CLI uses it to authenticate as the
-  # gateway admin directly, bypassing the device-registry scope check.
+_openclaw_list_devices() {
+  # 'devices list' only needs operator.pairing scope — runs fine via docker exec.
   docker exec \
     -e HOME=/home/node \
     -e "PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    "$CONTAINER" openclaw "$@"
+    "$CONTAINER" openclaw devices list 2>&1
+}
+
+_gateway_approve() {
+  # Approve a pending device via the gateway HTTP REST API using the master
+  # token.  This bypasses the WebSocket client and the device-registry scope
+  # check entirely — the gateway token is accepted as admin auth on HTTP routes.
+  local rid="$1"
+  local _token
+  _token=$(resolve_token "$N")
+  curl -sf --max-time 10 \
+    -X POST \
+    -H "Authorization: Bearer ${_token}" \
+    "http://127.0.0.1:${API_PORT}/api/v1/devices/${rid}/approve"
 }
 
 approve_devices() {
   local cli_output
-  cli_output=$(_openclaw_exec devices list 2>&1) || true
+  cli_output=$(_openclaw_list_devices) || true
 
   local request_ids
   request_ids=$(echo "$cli_output" | \
@@ -581,7 +589,7 @@ approve_devices() {
   local approved=0 failed=0
   while read -r rid; do
     echo "Approving $rid ..."
-    if _openclaw_exec devices approve "$rid" 2>&1; then
+    if _gateway_approve "$rid" >/dev/null 2>&1; then
       ((approved++)) || true
     else
       echo "  Error: Could not approve $rid"
@@ -592,10 +600,6 @@ approve_devices() {
   echo ""
   if [[ "$failed" -gt 0 ]]; then
     echo "Approved $approved device(s), $failed failed."
-    echo ""
-    echo "  Approve manually inside the container:"
-    echo "    docker exec -it -e HOME=/home/node $CONTAINER openclaw devices list"
-    echo "    docker exec -it -e HOME=/home/node $CONTAINER openclaw devices approve <requestId>"
     return 1
   else
     echo "Approved $approved device(s)."
@@ -650,7 +654,7 @@ print_status() {
 
   echo "Devices:"
   local devices_output
-  devices_output=$(_openclaw_exec devices list 2>&1) || true
+  devices_output=$(_openclaw_list_devices) || true
   local pending_count paired_count
   # Count lines in the Pending and Paired table sections
   pending_count=$(echo "$devices_output" | grep -cP '^│ [0-9a-f]{8}-' || echo "0")
@@ -725,7 +729,7 @@ wait_and_approve() {
 
   while [[ "$elapsed" -lt "$timeout" ]]; do
     local cli_output
-    cli_output=$(_openclaw_exec devices list 2>&1) || true
+    cli_output=$(_openclaw_list_devices) || true
 
     local request_ids
     request_ids=$(echo "$cli_output" | \
@@ -740,7 +744,7 @@ wait_and_approve() {
 
       local approved=0
       while read -r rid; do
-        if _openclaw_exec devices approve "$rid" 2>&1; then
+        if _gateway_approve "$rid" >/dev/null 2>&1; then
           ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"
