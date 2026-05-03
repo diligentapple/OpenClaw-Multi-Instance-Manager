@@ -534,6 +534,72 @@ restart_and_wait() {
 # Approve devices
 # ---------------------------------------------------------------------------
 
+# Ensure the CLI device (HOME=/home/node inside the container) has full
+# operator scopes in paired.json and device-auth.json.  The gateway scope
+# check for 'devices approve' looks at paired.json; if the wizard only
+# granted operator.pairing (the default for auto-paired devices), the
+# approve call fails with "missing scope: operator.read/admin".
+#
+# This patches the host-side files directly.  Callers must ensure the
+# gateway is restarted AFTER this runs so it re-reads paired.json.
+# Returns 0 whether or not a patch was needed (never fatal).
+_ensure_cli_device_admin() {
+  local auth_file="${DATA_DIR}/identity/device-auth.json"
+  local paired_file="${DATA_DIR}/devices/paired.json"
+
+  if ! sudo test -f "$auth_file" || ! sudo test -f "$paired_file"; then return 0; fi
+
+  local device_id
+  device_id=$(sudo jq -r '.deviceId // empty' "$auth_file" 2>/dev/null || true)
+  [[ -z "$device_id" ]] && return 0
+
+  # Skip if admin is already present
+  local has_admin
+  has_admin=$(sudo jq -r --arg id "$device_id" '
+    if has($id) then
+      (.[$id].scopes // [] | any(. == "operator.admin"))
+    else false end | if . then "yes" else "no" end
+  ' "$paired_file" 2>/dev/null || echo "no")
+  [[ "$has_admin" == "yes" ]] && return 0
+
+  # Patch paired.json
+  local tmp
+  tmp=$(mktemp)
+  sudo jq --arg id "$device_id" --argjson s \
+    '["operator.pairing","operator.read","operator.write","operator.admin"]' '
+    if has($id) then
+      .[$id].scopes = $s |
+      .[$id].approvedScopes = $s |
+      if .[$id].tokens.operator then .[$id].tokens.operator.scopes = $s else . end
+    else . end
+  ' "$paired_file" > "$tmp" 2>/dev/null || true
+  if jq empty "$tmp" 2>/dev/null; then
+    local owner
+    owner=$(sudo stat -c '%u:%g' "$paired_file")
+    sudo mv "$tmp" "$paired_file"
+    sudo chown "$owner" "$paired_file"
+  else
+    rm -f "$tmp"
+    return 0
+  fi
+
+  # Patch device-auth.json to match
+  local auth_tmp
+  auth_tmp=$(mktemp)
+  sudo jq --argjson s \
+    '["operator.pairing","operator.read","operator.write","operator.admin"]' '
+    if .tokens.operator then .tokens.operator.scopes = $s else . end
+  ' "$auth_file" > "$auth_tmp" 2>/dev/null || true
+  if jq empty "$auth_tmp" 2>/dev/null; then
+    local auth_owner
+    auth_owner=$(sudo stat -c '%u:%g' "$auth_file")
+    sudo mv "$auth_tmp" "$auth_file"
+    sudo chown "$auth_owner" "$auth_file"
+  else
+    rm -f "$auth_tmp"
+  fi
+}
+
 _openclaw_list_devices() {
   # 'devices list' only needs operator.pairing scope — runs fine via docker exec.
   docker exec \
@@ -767,6 +833,10 @@ do_enable() {
   get_tailscale_info
   get_instance_info
 
+  # Patch CLI device scopes BEFORE the restart so the gateway reads the
+  # updated paired.json in the same restart that applies the config changes.
+  _ensure_cli_device_admin
+
   edit_config_enable
   setup_firewall
   restart_and_wait
@@ -801,6 +871,27 @@ do_status() {
 
 do_approve() {
   get_instance_info
+
+  # Patch CLI device scopes if needed; restart gateway so it re-reads paired.json.
+  local paired_before
+  paired_before=$(sudo jq -r '..' "${DATA_DIR}/devices/paired.json" 2>/dev/null | md5sum || true)
+  _ensure_cli_device_admin
+  local paired_after
+  paired_after=$(sudo jq -r '..' "${DATA_DIR}/devices/paired.json" 2>/dev/null | md5sum || true)
+  if [[ "$paired_before" != "$paired_after" ]]; then
+    echo "Restarting gateway to apply updated device scopes..."
+    docker restart "$CONTAINER" >/dev/null 2>&1 || true
+    local i
+    for i in $(seq 1 30); do
+      if docker exec "$CONTAINER" node -e \
+        "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+        >/dev/null 2>&1; then
+        break
+      fi
+      sleep 2
+    done
+  fi
+
   approve_devices
 }
 
