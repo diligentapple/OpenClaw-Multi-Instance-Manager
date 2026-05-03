@@ -531,60 +531,6 @@ restart_and_wait() {
 }
 
 # ---------------------------------------------------------------------------
-# Token sync -- ensure gateway.auth.token matches OPENCLAW_GATEWAY_TOKEN
-# ---------------------------------------------------------------------------
-
-# The CLI reads gateway.auth.token from openclaw.json to authenticate.
-# If the wizard generated a fresh token (pre-fix onboarding), this value
-# diverges from OPENCLAW_GATEWAY_TOKEN, which is the gateway's actual master
-# token.  The CLI then connects with the wrong token, gets treated as a
-# limited-scope paired device, and 'devices approve' fails with
-# "missing scope: operator.admin".  Detect and correct this before approving.
-sync_gateway_token() {
-  local env_file="${HOME_DIR}/openclaw${N}/.env"
-  local env_token json_token
-
-  [[ -f "$env_file" ]] || return 0
-  env_token=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$env_file" 2>/dev/null || true)
-  [[ -n "$env_token" ]] || return 0
-
-  json_token=$(sudo jq -r '.gateway.auth.token // empty' "$CONFIG" 2>/dev/null || true)
-
-  if [[ "$env_token" == "$json_token" ]]; then
-    return 0
-  fi
-
-  echo "Note: gateway.auth.token does not match OPENCLAW_GATEWAY_TOKEN — syncing..."
-  local tmp
-  tmp=$(mktemp)
-  sudo jq --arg tok "$env_token" '.gateway.auth.token = $tok' "$CONFIG" > "$tmp" 2>/dev/null || true
-
-  if jq empty "$tmp" 2>/dev/null; then
-    _owner=$(sudo stat -c '%u:%g' "$CONFIG" 2>/dev/null || echo "1000:1000")
-    sudo mv "$tmp" "$CONFIG"
-    sudo chown "$_owner" "$CONFIG"
-    echo "Token synced. Restarting gateway..."
-    docker restart "$CONTAINER" >/dev/null 2>&1 || true
-    local i
-    for i in $(seq 1 15); do
-      if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1 \
-         || docker exec "$CONTAINER" node -e \
-           "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
-           >/dev/null 2>&1; then
-        echo "Gateway ready."
-        return 0
-      fi
-      sleep 2
-    done
-    echo "Warning: gateway slow to respond after token sync. Approval may still work."
-  else
-    rm -f "$tmp"
-    echo "Warning: token sync failed. Approval may fail with 'missing scope: operator.admin'."
-    echo "  Manual fix: openclaw-onboard $N"
-  fi
-}
-
-# ---------------------------------------------------------------------------
 # Approve devices
 # ---------------------------------------------------------------------------
 
@@ -632,35 +578,22 @@ approve_devices() {
   local approved=0 failed=0
   while read -r rid; do
     echo "Approving $rid ..."
-    local approve_out
-    approve_out=$(docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1) || true
-    printf '%s\n' "$approve_out"
-
-    if echo "$approve_out" | grep -q "missing scope: operator.admin"; then
-      echo ""
-      echo "  Error: The CLI session inside the container has 'operator.pairing' scope only."
-      echo "  This happens when onboarding ran without the gateway's master token, so"
-      echo "  the wizard could not pair the CLI with operator.admin."
-      echo ""
-      echo "  Fix: re-run onboarding (re-pairs the CLI with full admin scope):"
-      echo "    openclaw-onboard $N"
-      echo ""
-      echo "  If you want to approve now without re-onboarding, open the dashboard"
-      echo "  URL and approve from there (no CLI needed)."
-      return 1
-    fi
-
-    if echo "$approve_out" | grep -qi "error\|failed"; then
+    if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
+      ((approved++)) || true
+    else
       echo "  Error: Could not approve $rid"
       ((failed++)) || true
-    else
-      ((approved++)) || true
     fi
   done <<< "$request_ids"
 
   echo ""
   if [[ "$failed" -gt 0 ]]; then
     echo "Approved $approved device(s), $failed failed."
+    echo ""
+    echo "  You can try approving manually inside the container:"
+    echo "    docker exec -it $CONTAINER bash"
+    echo "    node /app/openclaw.mjs devices list"
+    echo "    node /app/openclaw.mjs devices approve <requestId>"
     return 1
   else
     echo "Approved $approved device(s)."
@@ -806,30 +739,14 @@ wait_and_approve() {
 
       local approved=0
       while read -r rid; do
-        local approve_out
-        approve_out=$(docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1) || true
-        printf '%s\n' "$approve_out"
-
-        if echo "$approve_out" | grep -q "missing scope: operator.admin"; then
-          echo ""
-          echo "  Error: CLI session has 'operator.pairing' scope only — cannot auto-approve."
-          echo "  Fix: openclaw-onboard $N   (re-pairs CLI with operator.admin scope)"
-          echo "  Or approve manually from the dashboard URL shown above."
-          return 1
-        fi
-
-        if ! echo "$approve_out" | grep -qi "error\|failed"; then
+        if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
           ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"
         fi
       done <<< "$request_ids"
 
-      if [[ "$approved" -gt 0 ]]; then
-        echo "Approved $approved device(s) — dashboard is ready."
-      else
-        echo "Warning: 0 devices approved. Run 'openclaw-remote $N --approve' to retry."
-      fi
+      echo "Approved $approved device(s). Device paired — dashboard is ready."
       return 0
     fi
 
@@ -884,7 +801,6 @@ do_status() {
 
 do_approve() {
   get_instance_info
-  sync_gateway_token
   approve_devices
 }
 
