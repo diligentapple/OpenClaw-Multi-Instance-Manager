@@ -290,7 +290,11 @@ edit_config_enable() {
   # config and the gateway stays in loopback mode.
   local env_file="${HOME_DIR}/openclaw${N}/.env"
   if [[ -f "$env_file" ]]; then
-    sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=lan/' "$env_file"
+    if grep -q '^OPENCLAW_GATEWAY_BIND=' "$env_file" 2>/dev/null; then
+      sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=lan/' "$env_file"
+    else
+      echo "OPENCLAW_GATEWAY_BIND=lan" >> "$env_file"
+    fi
   fi
 
   echo "Config updated."
@@ -329,7 +333,11 @@ edit_config_disable() {
   # Revert .env so the container command matches the JSON config
   local env_file="${HOME_DIR}/openclaw${N}/.env"
   if [[ -f "$env_file" ]]; then
-    sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=loopback/' "$env_file"
+    if grep -q '^OPENCLAW_GATEWAY_BIND=' "$env_file" 2>/dev/null; then
+      sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=loopback/' "$env_file"
+    else
+      echo "OPENCLAW_GATEWAY_BIND=loopback" >> "$env_file"
+    fi
   fi
 
   echo "Config updated: gateway.bind=loopback, remote access origins removed."
@@ -504,7 +512,7 @@ restart_and_wait() {
       | grep -v "^$" || true
   else
     # Fallback for non-standard setups
-    docker restart "$CONTAINER" >/dev/null
+    docker restart "$CONTAINER" >/dev/null 2>&1 || true
   fi
 
   echo "Waiting for gateway to start (may take up to 60s)..."
@@ -567,19 +575,10 @@ approve_devices() {
     fi
   fi
 
-  # Resolve the gateway admin token; needed for the --token retry when the CLI
-  # connects without operator.admin scope (the container env has the token but
-  # the CLI WebSocket auth may not pick it up automatically).
-  local gw_token
-  gw_token=$(resolve_token "$N")
-
   local approved=0 failed=0
   while read -r rid; do
     echo "Approving $rid ..."
     if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
-      ((approved++)) || true
-    elif [[ -n "$gw_token" ]] && \
-         docker exec "$CONTAINER" node /app/openclaw.mjs devices approve --token "$gw_token" "$rid" 2>&1; then
       ((approved++)) || true
     else
       echo "  Error: Could not approve $rid"
@@ -739,13 +738,8 @@ wait_and_approve() {
       echo "Found $count pending device(s). Auto-approving..."
 
       local approved=0
-      local gw_token
-      gw_token=$(resolve_token "$N")
       while read -r rid; do
         if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
-          ((approved++)) || true
-        elif [[ -n "$gw_token" ]] && \
-             docker exec "$CONTAINER" node /app/openclaw.mjs devices approve --token "$gw_token" "$rid" 2>&1; then
           ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"

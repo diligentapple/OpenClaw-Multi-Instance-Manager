@@ -286,7 +286,11 @@ apply_preset() {
 
   # If the preset sets bind=lan, update the .env so the gateway command matches
   if grep -q '"bind": "lan"' "$preset_file"; then
-    sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=lan/' "$env_file"
+    if grep -q '^OPENCLAW_GATEWAY_BIND=' "$env_file" 2>/dev/null; then
+      sed -i 's/^OPENCLAW_GATEWAY_BIND=.*/OPENCLAW_GATEWAY_BIND=lan/' "$env_file"
+    else
+      echo "OPENCLAW_GATEWAY_BIND=lan" >> "$env_file"
+    fi
   fi
 
   # Restart to pick up new config

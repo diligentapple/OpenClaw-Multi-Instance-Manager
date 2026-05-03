@@ -95,11 +95,12 @@ check_instance() {
     return 0
   fi
 
-  # Get the most recent log line timestamp
-  local last_log
-  last_log=$(docker logs "$container" --since "${THRESHOLD}m" 2>&1 | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' | tail -1 || true)
+  # Check for any log output in the silence window — do not filter by timestamp
+  # format because gateway log lines may not all start with ISO timestamps.
+  local recent_lines
+  recent_lines=$(docker logs "$container" --since "${THRESHOLD}m" 2>&1 | wc -l || echo "0")
 
-  if [[ -n "$last_log" ]]; then
+  if [[ "${recent_lines:-0}" -gt 0 ]]; then
     # Container has recent log output — it's alive
     return 0
   fi
@@ -122,11 +123,19 @@ check_instance() {
 
   echo "$(date -Iseconds) [watchdog] Instance #$n: restarting..."
 
+  local restart_failed=false
   if [[ -f "$compose_file" ]]; then
-    $COMPOSE_BIN --project-directory "$instance_dir" \
-      -f "$compose_file" up -d --force-recreate 2>&1 | grep -v "^$" || true
+    if ! $COMPOSE_BIN --project-directory "$instance_dir" \
+      -f "$compose_file" up -d --force-recreate >/dev/null 2>&1; then
+      restart_failed=true
+    fi
   else
-    docker restart "$container" >/dev/null 2>&1 || true
+    if ! docker restart "$container" >/dev/null 2>&1; then
+      restart_failed=true
+    fi
+  fi
+  if [[ "$restart_failed" == true ]]; then
+    echo "$(date -Iseconds) [watchdog] Instance #$n: restart command FAILED. Check: openclaw-logs $n"
   fi
 
   # Wait for it to come back

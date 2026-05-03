@@ -106,7 +106,9 @@ delete_instance() {
   local orphan_cids
   orphan_cids=$(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}" 2>/dev/null || true)
   if [[ -n "$orphan_cids" ]]; then
-    docker rm -f $orphan_cids >/dev/null 2>&1 || true
+    while IFS= read -r cid; do
+      [[ -n "$cid" ]] && docker rm -f "$cid" >/dev/null 2>&1 || true
+    done <<< "$orphan_cids"
   fi
   local orphan_nets
   orphan_nets=$(docker network ls --format '{{.Name}}' 2>/dev/null \

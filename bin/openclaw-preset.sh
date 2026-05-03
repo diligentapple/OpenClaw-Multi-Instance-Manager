@@ -240,9 +240,11 @@ create_preset() {
 
   # Merge auth, then optional telegram block
   local json
-  json=$(echo "$base_json" "$auth_block" | jq -s '.[0] * .[1]')
+  json=$(echo "$base_json" "$auth_block" | jq -s '.[0] * .[1]') \
+    || { echo "Error: failed to build preset JSON (jq merge failed)."; return 1; }
   if [[ "$tg_enabled" == true ]]; then
-    json=$(echo "$json" "$tg_block" | jq -s '.[0] * .[1]')
+    json=$(echo "$json" "$tg_block" | jq -s '.[0] * .[1]') \
+      || { echo "Error: failed to merge Telegram config into preset."; return 1; }
   fi
 
   echo ""

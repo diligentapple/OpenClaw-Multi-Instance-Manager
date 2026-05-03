@@ -9,6 +9,8 @@ N="${1:-}"
 HOME_DIR="${HOME:-/root}"
 DATA_DIR="${HOME_DIR}/.openclaw${N}"
 CONTAINER="openclaw${N}-gateway"
+ENV_FILE="${HOME_DIR}/openclaw${N}/.env"
+CONFIG="${DATA_DIR}/openclaw.json"
 
 # Verify Docker daemon is reachable (catches missing docker group membership)
 if ! docker info >/dev/null 2>&1; then
@@ -46,17 +48,29 @@ sudo chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
 # auth token), which would otherwise trigger "Existing config detected" in the
 # wizard even for brand-new instances.  The gateway tolerates the missing file
 # via --allow-unconfigured and will re-read the new config after restart.
-sudo rm -f "${DATA_DIR}/openclaw.json"
+sudo rm -f "$CONFIG"
 
 # Join the gateway's Docker Compose network so the wizard can reach the running
 # gateway for its connection-checking step (e.g. generating the Telegram pairing
 # code).  The network is safe to use even when the gateway restarts mid-wizard
-# because compose recreates the container on the same network automatically —
-# the wizard container itself is unaffected.
+# because compose recreates the container on the same network automatically.
 COMPOSE_NETWORK="openclaw${N}_default"
 NETWORK_OPT=()
 if docker network inspect "$COMPOSE_NETWORK" >/dev/null 2>&1; then
   NETWORK_OPT=(--network "$COMPOSE_NETWORK")
+fi
+
+# Pass the existing gateway token to the wizard so it uses the same auth token
+# as OPENCLAW_GATEWAY_TOKEN in the .env (created by openclaw-new).  When the
+# wizard ran via `docker exec` inside the gateway container it inherited this
+# env var automatically.  Now that it runs in a separate container it doesn't
+# — causing the wizard to generate a fresh token that diverges from the
+# gateway's env token and breaks CLI auth (missing scope: operator.admin).
+# Using an array avoids word-splitting and quoting issues with the token value.
+WIZARD_TOKEN_OPT=()
+if [[ -f "$ENV_FILE" ]]; then
+  _wt=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$ENV_FILE" 2>/dev/null || true)
+  [[ -n "$_wt" ]] && WIZARD_TOKEN_OPT=(-e "OPENCLAW_GATEWAY_TOKEN=$_wt")
 fi
 
 # Run onboarding in a *separate* one-off container that shares the data volume.
@@ -70,15 +84,43 @@ docker run --rm -it \
   -e NPM_CONFIG_PREFIX=/home/node/.npm-global \
   -e PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   -e NODE_OPTIONS="--disable-warning=DEP0040" \
+  "${WIZARD_TOKEN_OPT[@]}" \
   "${NETWORK_OPT[@]}" \
   -v "${DATA_DIR}:/home/node/.openclaw" \
   "$IMAGE" \
   node openclaw.mjs onboard --mode local
 
-# The wizard only writes openclaw.json in the bind-mounted data dir; .env
-# values are unchanged, so docker restart is sufficient and much faster than
-# --force-recreate (preserves the container's writable layer, avoiding the
-# apt-get install tax on cold start).
+# Patch openclaw.json BEFORE restarting the gateway so only one restart is
+# needed and the gateway reads the fully correct config from the start:
+#
+#  1. allowInsecureAuth = true   — HTTP fallback URLs work without HTTPS
+#  2. gateway.auth.token = $env_token — belt-and-suspenders token sync.
+#     The wizard should already write the correct token (OPENCLAW_GATEWAY_TOKEN
+#     was passed above), but if anything went wrong this guarantees alignment.
+if sudo test -f "$CONFIG"; then
+  _patch_tmp=$(mktemp)
+  _env_token=""
+  [[ -f "$ENV_FILE" ]] && _env_token=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$ENV_FILE" 2>/dev/null || true)
+
+  if [[ -n "$_env_token" ]]; then
+    sudo jq --arg tok "$_env_token" \
+      '.gateway.controlUi.allowInsecureAuth = true | .gateway.auth.token = $tok' \
+      "$CONFIG" > "$_patch_tmp" 2>/dev/null || true
+  else
+    sudo jq '.gateway.controlUi.allowInsecureAuth = true' \
+      "$CONFIG" > "$_patch_tmp" 2>/dev/null || true
+  fi
+
+  if jq empty "$_patch_tmp" 2>/dev/null; then
+    _owner=$(sudo stat -c '%u:%g' "$CONFIG")
+    sudo mv "$_patch_tmp" "$CONFIG"
+    sudo chown "$_owner" "$CONFIG"
+  else
+    rm -f "$_patch_tmp"
+  fi
+fi
+
+# Restart the gateway once with the fully patched config.
 echo "Restarting gateway to apply new configuration..."
 docker restart "$CONTAINER" >/dev/null 2>&1 || true
 
@@ -107,25 +149,12 @@ for i in $(seq 1 60); do
 done
 
 # Follow gateway logs briefly so the user sees any Telegram pairing code emitted
-# on startup.  The wizard's gateway-checking step may also have printed pairing
-# info to the gateway process, which only appears here.
+# on startup.  Use --tail 50 rather than --since Ns: if the health check took
+# a while the startup logs would be older than any fixed time window.
 echo ""
 echo "Gateway startup log (Ctrl-C to stop, or wait ~15s):"
-timeout 15 docker logs --since 5s -f "$CONTAINER" 2>&1 || true
+timeout 15 docker logs --tail 50 -f "$CONTAINER" 2>&1 || true
 echo ""
-
-# Always enable insecure auth so HTTP fallback URLs work without HTTPS
-CONFIG="${DATA_DIR}/openclaw.json"
-if sudo test -f "$CONFIG"; then
-  local_tmp=$(mktemp)
-  if sudo jq '.gateway.controlUi.allowInsecureAuth = true' "$CONFIG" > "$local_tmp" && jq empty "$local_tmp" 2>/dev/null; then
-    owner=$(sudo stat -c '%u:%g' "$CONFIG")
-    sudo mv "$local_tmp" "$CONFIG"
-    sudo chown "$owner" "$CONFIG"
-  else
-    rm -f "$local_tmp"
-  fi
-fi
 
 echo "Onboarding complete for instance #$N"
 echo "  Dashboard : http://127.0.0.1:${API_PORT}/"
