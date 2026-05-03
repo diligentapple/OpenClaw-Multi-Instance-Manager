@@ -547,12 +547,55 @@ _gateway_approve() {
   # token.  This bypasses the WebSocket client and the device-registry scope
   # check entirely — the gateway token is accepted as admin auth on HTTP routes.
   local rid="$1"
-  local _token
+  local _token _base _status _body
   _token=$(resolve_token "$N")
-  curl -sf --max-time 10 \
-    -X POST \
-    -H "Authorization: Bearer ${_token}" \
-    "http://127.0.0.1:${API_PORT}/api/v1/devices/${rid}/approve"
+  _base="http://127.0.0.1:${API_PORT}"
+
+  # Try endpoint patterns in order; return on first 2xx.
+  local _path _auth_header _url
+  for _path in \
+    "/api/v1/devices/${rid}/approve" \
+    "/api/devices/${rid}/approve" \
+    "/api/v1/nodes/${rid}/approve" \
+    "/api/nodes/${rid}/approve"; do
+
+    for _auth_header in \
+      "Authorization: Bearer ${_token}" \
+      "X-Auth-Token: ${_token}"; do
+
+      _body=$(curl -s --max-time 10 -X POST \
+        -H "$_auth_header" \
+        -H "Content-Type: application/json" \
+        -w "\n__STATUS__%{http_code}" \
+        "${_base}${_path}" 2>/dev/null) || true
+      _status=$(echo "$_body" | grep '__STATUS__' | sed 's/__STATUS__//')
+
+      if [[ "$_status" =~ ^2 ]]; then
+        return 0
+      fi
+    done
+  done
+
+  # All paths failed — also try token as query param
+  for _path in \
+    "/api/v1/devices/${rid}/approve" \
+    "/api/devices/${rid}/approve"; do
+
+    _body=$(curl -s --max-time 10 -X POST \
+      -H "Content-Type: application/json" \
+      -w "\n__STATUS__%{http_code}" \
+      "${_base}${_path}?token=${_token}" 2>/dev/null) || true
+    _status=$(echo "$_body" | grep '__STATUS__' | sed 's/__STATUS__//')
+
+    if [[ "$_status" =~ ^2 ]]; then
+      return 0
+    fi
+  done
+
+  # Nothing worked — print last response for diagnosis
+  echo "  [debug] last HTTP status: ${_status}"
+  echo "  [debug] last response: $(echo "$_body" | grep -v '__STATUS__' | head -3)"
+  return 1
 }
 
 approve_devices() {
