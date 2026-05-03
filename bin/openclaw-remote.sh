@@ -632,22 +632,35 @@ approve_devices() {
   local approved=0 failed=0
   while read -r rid; do
     echo "Approving $rid ..."
-    if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
-      ((approved++)) || true
-    else
+    local approve_out
+    approve_out=$(docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1) || true
+    printf '%s\n' "$approve_out"
+
+    if echo "$approve_out" | grep -q "missing scope: operator.admin"; then
+      echo ""
+      echo "  Error: The CLI session inside the container has 'operator.pairing' scope only."
+      echo "  This happens when onboarding ran without the gateway's master token, so"
+      echo "  the wizard could not pair the CLI with operator.admin."
+      echo ""
+      echo "  Fix: re-run onboarding (re-pairs the CLI with full admin scope):"
+      echo "    openclaw-onboard $N"
+      echo ""
+      echo "  If you want to approve now without re-onboarding, open the dashboard"
+      echo "  URL and approve from there (no CLI needed)."
+      return 1
+    fi
+
+    if echo "$approve_out" | grep -qi "error\|failed"; then
       echo "  Error: Could not approve $rid"
       ((failed++)) || true
+    else
+      ((approved++)) || true
     fi
   done <<< "$request_ids"
 
   echo ""
   if [[ "$failed" -gt 0 ]]; then
     echo "Approved $approved device(s), $failed failed."
-    echo ""
-    echo "  You can try approving manually inside the container:"
-    echo "    docker exec -it $CONTAINER bash"
-    echo "    node /app/openclaw.mjs devices list"
-    echo "    node /app/openclaw.mjs devices approve <requestId>"
     return 1
   else
     echo "Approved $approved device(s)."
@@ -793,14 +806,30 @@ wait_and_approve() {
 
       local approved=0
       while read -r rid; do
-        if docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1; then
+        local approve_out
+        approve_out=$(docker exec "$CONTAINER" node /app/openclaw.mjs devices approve "$rid" 2>&1) || true
+        printf '%s\n' "$approve_out"
+
+        if echo "$approve_out" | grep -q "missing scope: operator.admin"; then
+          echo ""
+          echo "  Error: CLI session has 'operator.pairing' scope only — cannot auto-approve."
+          echo "  Fix: openclaw-onboard $N   (re-pairs CLI with operator.admin scope)"
+          echo "  Or approve manually from the dashboard URL shown above."
+          return 1
+        fi
+
+        if ! echo "$approve_out" | grep -qi "error\|failed"; then
           ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"
         fi
       done <<< "$request_ids"
 
-      echo "Approved $approved device(s). Device paired — dashboard is ready."
+      if [[ "$approved" -gt 0 ]]; then
+        echo "Approved $approved device(s) — dashboard is ready."
+      else
+        echo "Warning: 0 devices approved. Run 'openclaw-remote $N --approve' to retry."
+      fi
       return 0
     fi
 
@@ -830,9 +859,6 @@ do_enable() {
   fi
 
   print_summary
-
-  # Ensure token is in sync before polling for devices (handles pre-fix onboardings)
-  sync_gateway_token
 
   # Poll for pending devices and auto-approve so the user can just open the
   # dashboard URL on their laptop/browser and get paired without running a
