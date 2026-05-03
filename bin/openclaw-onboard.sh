@@ -50,42 +50,29 @@ sudo chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
 # via --allow-unconfigured and will re-read the new config after restart.
 sudo rm -f "$CONFIG"
 
-# Join the gateway's Docker Compose network so the wizard can reach the running
-# gateway for its connection-checking step (e.g. generating the Telegram pairing
-# code).  The network is safe to use even when the gateway restarts mid-wizard
-# because compose recreates the container on the same network automatically.
-COMPOSE_NETWORK="openclaw${N}_default"
-NETWORK_OPT=()
-if docker network inspect "$COMPOSE_NETWORK" >/dev/null 2>&1; then
-  NETWORK_OPT=(--network "$COMPOSE_NETWORK")
+# Ensure the gateway container is running so the wizard can connect to it.
+if [[ "$(docker inspect --format '{{.State.Status}}' "$CONTAINER" 2>/dev/null)" != "running" ]]; then
+  echo "Starting gateway container..."
+  docker start "$CONTAINER" >/dev/null
+  sleep 2
 fi
 
-# Pass the existing gateway token to the wizard so it uses the same auth token
-# as OPENCLAW_GATEWAY_TOKEN in the .env (created by openclaw-new).  When the
-# wizard ran via `docker exec` inside the gateway container it inherited this
-# env var automatically.  Now that it runs in a separate container it doesn't
-# — causing the wizard to generate a fresh token that diverges from the
-# gateway's env token and breaks CLI auth (missing scope: operator.admin).
-# Using an array avoids word-splitting and quoting issues with the token value.
-WIZARD_TOKEN_OPT=()
-if [[ -f "$ENV_FILE" ]]; then
-  _wt=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$ENV_FILE" 2>/dev/null || true)
-  [[ -n "$_wt" ]] && WIZARD_TOKEN_OPT=(-e "OPENCLAW_GATEWAY_TOKEN=$_wt")
-fi
-
-# Run onboarding in a *separate* one-off container that shares the data volume.
-# This avoids the gateway's file-watcher restarting the container mid-wizard and
-# killing the interactive exec session (the root cause of the "exits after
-# channel selection" bug).
+# Run the wizard in a separate container that shares the gateway's network
+# namespace (--network container:NAME).  This gives the wizard loopback access
+# to the gateway (127.0.0.1:18789) — the same as the old 'docker exec' approach.
+# The gateway grants operator.admin scope to wizard connections over loopback,
+# which is required for 'openclaw-remote --approve' to work afterwards.
+# Using a separate container (instead of docker exec) means the gateway's
+# file-watcher can restart the gateway mid-wizard without killing the wizard
+# session (the root cause of the "exits after channel selection" bug).
 docker run --rm -it \
   --user root \
+  --network "container:${CONTAINER}" \
   -e HOME=/home/node \
   -e TERM=xterm-256color \
   -e NPM_CONFIG_PREFIX=/home/node/.npm-global \
   -e PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   -e NODE_OPTIONS="--disable-warning=DEP0040" \
-  "${WIZARD_TOKEN_OPT[@]}" \
-  "${NETWORK_OPT[@]}" \
   -v "${DATA_DIR}:/home/node/.openclaw" \
   "$IMAGE" \
   node openclaw.mjs onboard --mode local
