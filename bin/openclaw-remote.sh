@@ -547,54 +547,49 @@ _gateway_approve() {
   # token.  This bypasses the WebSocket client and the device-registry scope
   # check entirely — the gateway token is accepted as admin auth on HTTP routes.
   local rid="$1"
-  local _token _base _status _body
+  local _token _base _body _status
   _token=$(resolve_token "$N")
   _base="http://127.0.0.1:${API_PORT}"
 
-  # Try endpoint patterns in order; return on first 2xx.
-  local _path _auth_header _url
+  # Fetch the dashboard JS bundle and extract API route for device approval.
+  # The dashboard JS makes the same API call we need here.
+  local _approve_path=""
+  local _html _js_path _js
+  _html=$(curl -sf --max-time 5 "${_base}/" 2>/dev/null) || true
+  _js_path=$(echo "$_html" | grep -oP 'src="([^"]+\.js)"' | grep -oP '"[^"]+"' | tr -d '"' | head -1)
+  if [[ -n "$_js_path" ]]; then
+    _js=$(curl -sf --max-time 15 "${_base}${_js_path}" 2>/dev/null) || true
+    _approve_path=$(echo "$_js" | grep -oP '"[^"]*devices[^"]*approve[^"]*"' | tr -d '"' | head -1)
+    if [[ -z "$_approve_path" ]]; then
+      _approve_path=$(echo "$_js" | grep -oP '"[^"]*nodes[^"]*approve[^"]*"' | tr -d '"' | head -1)
+    fi
+  fi
+
+  # Try discovered path first, then common fallbacks
+  local _path
   for _path in \
+    "${_approve_path}" \
     "/api/v1/devices/${rid}/approve" \
     "/api/devices/${rid}/approve" \
     "/api/v1/nodes/${rid}/approve" \
     "/api/nodes/${rid}/approve"; do
 
-    for _auth_header in \
-      "Authorization: Bearer ${_token}" \
-      "X-Auth-Token: ${_token}"; do
-
-      _body=$(curl -s --max-time 10 -X POST \
-        -H "$_auth_header" \
-        -H "Content-Type: application/json" \
-        -w "\n__STATUS__%{http_code}" \
-        "${_base}${_path}" 2>/dev/null) || true
-      _status=$(echo "$_body" | grep '__STATUS__' | sed 's/__STATUS__//')
-
-      if [[ "$_status" =~ ^2 ]]; then
-        return 0
-      fi
-    done
-  done
-
-  # All paths failed — also try token as query param
-  for _path in \
-    "/api/v1/devices/${rid}/approve" \
-    "/api/devices/${rid}/approve"; do
+    [[ -z "$_path" ]] && continue
 
     _body=$(curl -s --max-time 10 -X POST \
+      -H "Authorization: Bearer ${_token}" \
       -H "Content-Type: application/json" \
-      -w "\n__STATUS__%{http_code}" \
-      "${_base}${_path}?token=${_token}" 2>/dev/null) || true
-    _status=$(echo "$_body" | grep '__STATUS__' | sed 's/__STATUS__//')
+      -w "\n__HTTP_STATUS__%{http_code}" \
+      "${_base}${_path/${rid}/$rid}" 2>/dev/null) || true
+    _status=$(echo "$_body" | grep -oP '(?<=__HTTP_STATUS__)\d+')
 
     if [[ "$_status" =~ ^2 ]]; then
       return 0
     fi
-  done
 
-  # Nothing worked — print last response for diagnosis
-  echo "  [debug] last HTTP status: ${_status}"
-  echo "  [debug] last response: $(echo "$_body" | grep -v '__STATUS__' | head -3)"
+    echo "  [debug] POST ${_path}: HTTP ${_status:-000}"
+    echo "$_body" | grep -v '__HTTP_STATUS__' | head -2 | sed 's/^/  [debug] /'
+  done
   return 1
 }
 
@@ -632,7 +627,7 @@ approve_devices() {
   local approved=0 failed=0
   while read -r rid; do
     echo "Approving $rid ..."
-    if _gateway_approve "$rid" >/dev/null 2>&1; then
+    if _gateway_approve "$rid"; then
       ((approved++)) || true
     else
       echo "  Error: Could not approve $rid"
@@ -787,7 +782,7 @@ wait_and_approve() {
 
       local approved=0
       while read -r rid; do
-        if _gateway_approve "$rid" >/dev/null 2>&1; then
+        if _gateway_approve "$rid"; then
           ((approved++)) || true
         else
           echo "  Warning: Could not approve $rid"
