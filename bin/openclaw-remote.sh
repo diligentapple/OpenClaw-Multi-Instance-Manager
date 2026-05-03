@@ -531,6 +531,60 @@ restart_and_wait() {
 }
 
 # ---------------------------------------------------------------------------
+# Token sync -- ensure gateway.auth.token matches OPENCLAW_GATEWAY_TOKEN
+# ---------------------------------------------------------------------------
+
+# The CLI reads gateway.auth.token from openclaw.json to authenticate.
+# If the wizard generated a fresh token (pre-fix onboarding), this value
+# diverges from OPENCLAW_GATEWAY_TOKEN, which is the gateway's actual master
+# token.  The CLI then connects with the wrong token, gets treated as a
+# limited-scope paired device, and 'devices approve' fails with
+# "missing scope: operator.admin".  Detect and correct this before approving.
+sync_gateway_token() {
+  local env_file="${HOME_DIR}/openclaw${N}/.env"
+  local env_token json_token
+
+  [[ -f "$env_file" ]] || return 0
+  env_token=$(grep -oP '^OPENCLAW_GATEWAY_TOKEN=\K.*' "$env_file" 2>/dev/null || true)
+  [[ -n "$env_token" ]] || return 0
+
+  json_token=$(sudo jq -r '.gateway.auth.token // empty' "$CONFIG" 2>/dev/null || true)
+
+  if [[ "$env_token" == "$json_token" ]]; then
+    return 0
+  fi
+
+  echo "Note: gateway.auth.token does not match OPENCLAW_GATEWAY_TOKEN — syncing..."
+  local tmp
+  tmp=$(mktemp)
+  sudo jq --arg tok "$env_token" '.gateway.auth.token = $tok' "$CONFIG" > "$tmp" 2>/dev/null || true
+
+  if jq empty "$tmp" 2>/dev/null; then
+    _owner=$(sudo stat -c '%u:%g' "$CONFIG" 2>/dev/null || echo "1000:1000")
+    sudo mv "$tmp" "$CONFIG"
+    sudo chown "$_owner" "$CONFIG"
+    echo "Token synced. Restarting gateway..."
+    docker restart "$CONTAINER" >/dev/null 2>&1 || true
+    local i
+    for i in $(seq 1 15); do
+      if curl -sf --max-time 2 "http://127.0.0.1:${API_PORT}/healthz" >/dev/null 2>&1 \
+         || docker exec "$CONTAINER" node -e \
+           "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+           >/dev/null 2>&1; then
+        echo "Gateway ready."
+        return 0
+      fi
+      sleep 2
+    done
+    echo "Warning: gateway slow to respond after token sync. Approval may still work."
+  else
+    rm -f "$tmp"
+    echo "Warning: token sync failed. Approval may fail with 'missing scope: operator.admin'."
+    echo "  Manual fix: openclaw-onboard $N"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Approve devices
 # ---------------------------------------------------------------------------
 
@@ -777,6 +831,9 @@ do_enable() {
 
   print_summary
 
+  # Ensure token is in sync before polling for devices (handles pre-fix onboardings)
+  sync_gateway_token
+
   # Poll for pending devices and auto-approve so the user can just open the
   # dashboard URL on their laptop/browser and get paired without running a
   # separate command.
@@ -801,6 +858,7 @@ do_status() {
 
 do_approve() {
   get_instance_info
+  sync_gateway_token
   approve_devices
 }
 
