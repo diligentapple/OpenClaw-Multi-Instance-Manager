@@ -126,7 +126,9 @@ CONTAINER="openclaw${N}-gateway"
 # ---------------------------------------------------------------------------
 
 check_prerequisites() {
-  install_jq
+  if [[ "$ACTION" != "approve" ]]; then
+    install_jq
+  fi
 
   # Verify Docker daemon is reachable (catches missing docker group membership)
   if ! docker info >/dev/null 2>&1; then
@@ -137,7 +139,7 @@ check_prerequisites() {
     exit 1
   fi
 
-  if ! sudo test -f "$CONFIG"; then
+  if [[ ! -f "$CONFIG" ]] && ! sudo test -f "$CONFIG"; then
     echo "Error: Instance #$N does not exist ($CONFIG not found)."
     echo "  Create it first: openclaw-new $N"
     exit 1
@@ -534,38 +536,42 @@ restart_and_wait() {
 # Approve devices
 # ---------------------------------------------------------------------------
 
-_openclaw_list_devices() {
-  # 'devices list' only needs operator.pairing scope — runs fine via docker exec.
-  docker exec \
+_openclaw_list_devices_json() {
+  # Read pairing state directly from the shared state directory.  The public
+  # CLI path auto-pairs its own CLI device with only operator.pairing, which
+  # both mutates state during a read and cannot approve admin-scope requests.
+  docker exec -i \
     -e HOME=/home/node \
     -e "PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    "$CONTAINER" openclaw devices list 2>&1
+    "$CONTAINER" \
+    node --input-type=module 2>&1 <<'NODE_EOF'
+import { listDevicePairing } from '/app/dist/plugin-sdk/device-bootstrap.js';
+const result = await listDevicePairing('/home/node/.openclaw');
+process.stdout.write(JSON.stringify({
+  pending: Array.isArray(result?.pending) ? result.pending : [],
+  paired: Array.isArray(result?.paired) ? result.paired : []
+}));
+NODE_EOF
 }
 
 _cli_approve() {
   local rid="$1"
-  # 'openclaw devices approve' connects with operator.pairing scope (least-privilege
-  # for device.pair.approve), so callerScopes = ["operator.pairing"].  Dashboard
-  # pairing requests typically require operator.admin in callerScopes, causing
-  # "missing scope: operator.admin".
-  #
-  # Fix: call approveDevicePairing() directly via Node.js, bypassing the WebSocket
-  # scope check entirely.  The function reads/writes paired.json and pending.json
-  # directly on the shared filesystem; the gateway detects the change via file
-  # watcher and sends the approval response to the waiting client.
-  #
-  # The request ID is a UUID (hex + hyphens), safe to interpolate into JS.
-  docker exec \
+  # Approve through OpenClaw's plugin SDK against the local state directory.
+  # This avoids the public CLI's least-privilege WebSocket scope and avoids
+  # importing hash-named /app/dist chunks directly.
+  docker exec -i \
     -e HOME=/home/node \
+    -e "OPENCLAW_REQUEST_ID=${rid}" \
     -e "PATH=/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     "$CONTAINER" \
-    node --input-type=module 2>&1 <<NODE_EOF
-import { n as approveDevicePairing } from '/app/dist/device-pairing-CMJxtqB1.js';
-const result = await approveDevicePairing('${rid}', {
+    node --input-type=module 2>&1 <<'NODE_EOF'
+import { approveDevicePairing } from '/app/dist/plugin-sdk/device-bootstrap.js';
+const requestId = process.env.OPENCLAW_REQUEST_ID ?? '';
+const result = await approveDevicePairing(requestId, {
   callerScopes: ['operator.pairing', 'operator.read', 'operator.write', 'operator.admin']
-});
+}, '/home/node/.openclaw');
 if (!result) {
-  process.stderr.write('[openclaw] Pairing request not found: ${rid}\n');
+  process.stderr.write(`[openclaw] Pairing request not found: ${requestId}\n`);
   process.exit(1);
 }
 if (result.status === 'forbidden') {
@@ -576,18 +582,20 @@ if (result.status !== 'approved') {
   process.stderr.write('[openclaw] Unexpected approval status: ' + result.status + '\n');
   process.exit(1);
 }
-process.stdout.write('Approved ' + (result.device?.deviceId ?? '${rid}') + '\n');
+process.stdout.write('Approved ' + (result.device?.deviceId ?? requestId) + '\n');
 NODE_EOF
 }
 
 approve_devices() {
-  local cli_output
-  cli_output=$(_openclaw_list_devices) || true
+  local devices_json
+  if ! devices_json=$(_openclaw_list_devices_json); then
+    echo "Error: could not list device pairing requests."
+    echo "$devices_json"
+    return 1
+  fi
 
   local request_ids
-  request_ids=$(echo "$cli_output" | \
-    grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | \
-    sort -u) || true
+  request_ids=$(echo "$devices_json" | grep -oP '"requestId"\s*:\s*"\K[0-9a-fA-F-]{36}' | sort -u) || true
 
   if [[ -z "$request_ids" ]]; then
     echo "No pending device pairing requests."
@@ -679,18 +687,10 @@ print_status() {
 
   echo "Devices:"
   local devices_output
-  devices_output=$(_openclaw_list_devices) || true
+  devices_output=$(_openclaw_list_devices_json) || devices_output='{"pending":[],"paired":[]}'
   local pending_count paired_count
-  # Count lines in the Pending and Paired table sections
-  pending_count=$(echo "$devices_output" | grep -cP '^│ [0-9a-f]{8}-' || echo "0")
-  paired_count=$(echo "$devices_output" | grep -cP '^│ [0-9a-f]{10,}' || echo "0")
-  # Fallback: parse the "Pending (N)" / "Paired (N)" headers
-  if [[ "$pending_count" == "0" ]]; then
-    pending_count=$(echo "$devices_output" | grep -oP 'Pending \(\K[0-9]+' || echo "0")
-  fi
-  if [[ "$paired_count" == "0" ]]; then
-    paired_count=$(echo "$devices_output" | grep -oP 'Paired \(\K[0-9]+' || echo "0")
-  fi
+  pending_count=$(echo "$devices_output" | jq -r '.pending | length' 2>/dev/null || echo "0")
+  paired_count=$(echo "$devices_output" | jq -r '.paired | length' 2>/dev/null || echo "0")
   echo "  Paired                : $paired_count"
   echo "  Pending               : $pending_count"
   echo ""
@@ -753,13 +753,11 @@ wait_and_approve() {
   local elapsed=0
 
   while [[ "$elapsed" -lt "$timeout" ]]; do
-    local cli_output
-    cli_output=$(_openclaw_list_devices) || true
+    local devices_json
+    devices_json=$(_openclaw_list_devices_json) || devices_json='{"pending":[]}'
 
     local request_ids
-    request_ids=$(echo "$cli_output" | \
-      grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | \
-      sort -u) || true
+    request_ids=$(echo "$devices_json" | grep -oP '"requestId"\s*:\s*"\K[0-9a-fA-F-]{36}' | sort -u) || true
 
     if [[ -n "$request_ids" ]]; then
       echo ""
