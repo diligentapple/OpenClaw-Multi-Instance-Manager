@@ -150,14 +150,6 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
-# Follow gateway logs briefly so the user sees any Telegram pairing code emitted
-# on startup.  Use --tail 50 rather than --since Ns: if the health check took
-# a while the startup logs would be older than any fixed time window.
-echo ""
-echo "Gateway startup log (Ctrl-C to stop, or wait ~15s):"
-timeout 15 docker logs --tail 50 -f "$CONTAINER" 2>&1 || true
-echo ""
-
 echo "Onboarding complete for instance #$N"
 echo "  Dashboard : http://127.0.0.1:${API_PORT}/"
 echo "  Logs      : openclaw-logs $N"
