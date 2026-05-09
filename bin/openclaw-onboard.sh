@@ -92,53 +92,6 @@ docker run --rm -it \
   "$IMAGE" \
   node openclaw.mjs onboard --mode local
 
-# Patch paired.json to ensure the CLI device (used by openclaw-remote --approve)
-# has full operator scopes.  The wizard pairs via loopback which should grant
-# operator.admin, but if the wizard exited early or the gateway auto-assigned
-# only operator.pairing, subsequent 'devices approve' calls would fail.
-# Belt-and-suspenders: explicitly set all operator scopes in both files.
-_IDENTITY="${DATA_DIR}/identity/device-auth.json"
-_PAIRED="${DATA_DIR}/devices/paired.json"
-if sudo test -f "$_IDENTITY"; then
-  _cli_device_id=$(sudo jq -r '.deviceId // empty' "$_IDENTITY" 2>/dev/null || true)
-  if [[ -n "$_cli_device_id" ]]; then
-    # Update paired.json — grant full operator scopes to the CLI device
-    if sudo test -f "$_PAIRED"; then
-      _paired_tmp=$(mktemp)
-      sudo jq --arg id "$_cli_device_id" '
-        if has($id) then
-          .[$id].scopes = ["operator.pairing","operator.read","operator.write","operator.admin"] |
-          .[$id].approvedScopes = ["operator.pairing","operator.read","operator.write","operator.admin"] |
-          if .[$id].tokens.operator then
-            .[$id].tokens.operator.scopes = ["operator.pairing","operator.read","operator.write","operator.admin"]
-          else . end
-        else . end
-      ' "$_PAIRED" > "$_paired_tmp" 2>/dev/null || true
-      if jq empty "$_paired_tmp" 2>/dev/null; then
-        _paired_owner=$(sudo stat -c '%u:%g' "$_PAIRED")
-        sudo mv "$_paired_tmp" "$_PAIRED"
-        sudo chown "$_paired_owner" "$_PAIRED"
-      else
-        rm -f "$_paired_tmp"
-      fi
-    fi
-    # Update device-auth.json — claim the same full scopes locally
-    _auth_tmp=$(mktemp)
-    sudo jq '
-      if .tokens.operator then
-        .tokens.operator.scopes = ["operator.pairing","operator.read","operator.write","operator.admin"]
-      else . end
-    ' "$_IDENTITY" > "$_auth_tmp" 2>/dev/null || true
-    if jq empty "$_auth_tmp" 2>/dev/null; then
-      _auth_owner=$(sudo stat -c '%u:%g' "$_IDENTITY")
-      sudo mv "$_auth_tmp" "$_IDENTITY"
-      sudo chown "$_auth_owner" "$_IDENTITY"
-    else
-      rm -f "$_auth_tmp"
-    fi
-  fi
-fi
-
 # Patch openclaw.json BEFORE restarting the gateway so only one restart is
 # needed and the gateway reads the fully correct config from the start:
 #
