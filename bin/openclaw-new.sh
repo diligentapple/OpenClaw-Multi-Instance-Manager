@@ -52,6 +52,21 @@ port_in_use() {
   fi
 }
 
+# Grant the host user persistent rwX access to a data dir via POSIX ACL so
+# WinSCP / SFTP / VS Code Remote can read and edit files even though the
+# root-running gateway writes them as root:root 0600.  The explicit mask
+# (m::rwX) matters: a file created with mode 0600 clamps its ACL mask to 0,
+# which disables the named-user entry until the mask is re-applied.  ACLs
+# never restrict the container: the gateway runs as root and uid 1000 owns
+# the files, so OpenClaw is unaffected.
+grant_host_acl() {
+  local dir="$1"
+  local host_user="${SUDO_USER:-${USER:-$(id -un)}}"
+  command -v setfacl >/dev/null 2>&1 || return 0
+  sudo setfacl -R  -m "u:${host_user}:rwX,m::rwX" "$dir" 2>/dev/null || true
+  sudo setfacl -R -d -m "u:${host_user}:rwX,m::rwX" "$dir" 2>/dev/null || true
+}
+
 render_template() {
   local tmpl="$1" out="$2"
   sed \
@@ -322,13 +337,17 @@ create_instance() {
     API_PORT="${N}8789"
     WS_PORT="${N}8790"
   else
-    read -r -p "Instance #$N needs custom ports. Enter API port (WS will be port+1): " CUSTOM_PORT
-    if ! is_int "$CUSTOM_PORT" || [[ "$CUSTOM_PORT" -lt 1024 || "$CUSTOM_PORT" -gt 65534 ]]; then
+    # Read into a local so the prompted port doesn't leak into the next
+    # range iteration via the global CUSTOM_PORT (each N>=6 instance must
+    # get its own prompt).
+    local prompt_port
+    read -r -p "Instance #$N needs custom ports. Enter API port (WS will be port+1): " prompt_port
+    if ! is_int "$prompt_port" || [[ "$prompt_port" -lt 1024 || "$prompt_port" -gt 65534 ]]; then
       echo "Error: port must be between 1024 and 65534."
       return 1
     fi
-    API_PORT="$CUSTOM_PORT"
-    WS_PORT="$((CUSTOM_PORT + 1))"
+    API_PORT="$prompt_port"
+    WS_PORT="$((prompt_port + 1))"
   fi
 
   if [[ -d "$INSTANCE_DIR" ]] || sudo test -d "$DATA_DIR"; then
@@ -344,26 +363,37 @@ create_instance() {
     return 1
   fi
 
-  mkdir -p "$INSTANCE_DIR" "$DATA_DIR"
+  # NOTE: create_instance is called as an 'if' condition, which suppresses
+  # 'set -e' for the whole function body — every critical command below needs
+  # an explicit failure check or errors are silently reported as success.
+  mkdir -p "$INSTANCE_DIR" "$DATA_DIR" || {
+    echo "Error: could not create ${INSTANCE_DIR} / ${DATA_DIR}."
+    return 1
+  }
   # Container runs as uid 1000 (node). Create workspace and identity dirs
   # with correct ownership without requiring sudo on the host.
-  docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/setup" "$OPENCLAW_IMAGE" \
-    -c 'mkdir -p /setup/workspace /setup/identity && chown -R 1000:1000 /setup'
+  if ! docker run --rm --user root --entrypoint sh -v "${DATA_DIR}:/setup" "$OPENCLAW_IMAGE" \
+    -c 'mkdir -p /setup/workspace /setup/identity && chown -R 1000:1000 /setup'; then
+    echo "Error: failed to initialize data dir for instance #$N (docker run)."
+    echo "  Clean up before retrying: openclaw-delete $N"
+    return 1
+  fi
 
   # Grant the host user persistent rwX access to DATA_DIR via POSIX ACL,
   # so VS Code Remote / WinSCP / SFTP can read and edit files even though
-  # the root-running gateway keeps writing them as root:root 0600.  The
-  # default ACL (-d) is inherited by files the container creates later.
-  local host_user="${SUDO_USER:-${USER:-$(id -un)}}"
+  # the root-running gateway keeps writing them as root:root 0600.
   if command -v setfacl >/dev/null 2>&1; then
-    sudo setfacl -R  -m "u:${host_user}:rwX" "$DATA_DIR" 2>/dev/null || true
-    sudo setfacl -R -d -m "u:${host_user}:rwX" "$DATA_DIR" 2>/dev/null || true
+    grant_host_acl "$DATA_DIR"
   else
     echo "Note: setfacl not found; install 'acl' to edit data files over SFTP/VS Code."
     echo "      Ubuntu/Debian: sudo apt-get install -y acl"
   fi
 
-  render_template "$TEMPLATE" "${INSTANCE_DIR}/docker-compose.yml"
+  render_template "$TEMPLATE" "${INSTANCE_DIR}/docker-compose.yml" || {
+    echo "Error: failed to render docker-compose template."
+    echo "  Clean up before retrying: openclaw-delete $N"
+    return 1
+  }
 
   # Generate per-instance .env file for docker compose
   local gw_token
@@ -374,8 +404,12 @@ OPENCLAW_GATEWAY_BIND=loopback
 ENVEOF
 
   echo "Bringing up instance #$N..."
-  $COMPOSE_BIN --project-directory "$INSTANCE_DIR" \
-    -f "${INSTANCE_DIR}/docker-compose.yml" up -d
+  if ! $COMPOSE_BIN --project-directory "$INSTANCE_DIR" \
+    -f "${INSTANCE_DIR}/docker-compose.yml" up -d; then
+    echo "Error: docker compose up failed for instance #$N."
+    echo "  Clean up before retrying: openclaw-delete $N"
+    return 1
+  fi
 
   # Create shortcut symlink: openclawN -> openclaw-exec
   EXEC_BIN="$(command -v openclaw-exec 2>/dev/null || echo "/usr/local/bin/openclaw-exec")"
@@ -389,6 +423,11 @@ ENVEOF
   if [[ -n "$PRESET_FILE" ]]; then
     apply_preset "$N" "$API_PORT" "$DATA_DIR" "$PRESET_FILE"
   fi
+
+  # Re-apply ACLs: the preset write and the gateway's first start create
+  # 0600 files (openclaw.json, identity) whose clamped ACL mask blocks
+  # SFTP/WinSCP access until the mask is re-applied.
+  grant_host_acl "$DATA_DIR"
 
   echo ""
   echo "Created OpenClaw instance #$N"
@@ -448,6 +487,7 @@ else
   echo "  openclaw-health $RANGE_START               Health check"
   echo "  openclaw-logs $RANGE_START                 Follow container logs"
   echo "  openclaw${RANGE_START} <command>            Run command inside container"
+  echo "  openclaw-perms --install all       Keep SFTP/WinSCP access to data dirs fresh"
   if command -v tailscale >/dev/null 2>&1; then
     echo "  openclaw-remote $RANGE_START               Enable remote access (Tailscale)"
   fi

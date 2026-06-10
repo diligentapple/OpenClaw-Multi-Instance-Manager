@@ -79,6 +79,23 @@ MONITORING
         openclaw-watchdog --install all      Install cron for all instances
         openclaw-watchdog --uninstall        Remove cron job
 
+  openclaw-perms [options] N|all
+      Grant the host user direct read/write access (POSIX ACLs) to
+      instance data dirs (~/.openclawN) so WinSCP / SFTP / VS Code
+      Remote can edit files without "access denied". The container is
+      unaffected: the gateway keeps running as root and uid 1000 stays
+      the file owner.
+      Options:
+        --install          Install a root cron job (every minute) that
+                           keeps ACLs fresh (the gateway keeps writing
+                           new 0600 files that block access until the
+                           ACL mask is re-applied)
+        --uninstall        Remove the cron job
+        --user USER        Host user to grant (default: current user)
+      Examples:
+        openclaw-perms all                   Fix all instances now
+        openclaw-perms --install all         Fix continuously (recommended)
+
 REMOTE ACCESS (via Tailscale)
 -----------------------------
 

@@ -58,9 +58,11 @@ fi
 # 2b. Re-render docker-compose template (picks up template improvements)
 TEMPLATE="${OPENCLAW_MGR_TEMPLATE:-${SHARE_DIR}/templates/docker-compose.yml.tmpl}"
 if [[ -f "$TEMPLATE" ]]; then
-  API_PORT=$(grep -oP '"\K\d+(?=:18789")' "$COMPOSE_FILE" | head -1)
-  WS_PORT=$(grep -oP '"\K\d+(?=:18790")' "$COMPOSE_FILE" | head -1)
-  TZ=$(grep -oP 'TZ:\s*\K\S+' "$COMPOSE_FILE" | head -1)
+  # '|| true' guards: under pipefail a no-match grep would kill the script
+  # mid-update; the -n checks below already handle the empty case gracefully.
+  API_PORT=$(grep -oP '"\K\d+(?=:18789")' "$COMPOSE_FILE" 2>/dev/null | head -1 || true)
+  WS_PORT=$(grep -oP '"\K\d+(?=:18790")' "$COMPOSE_FILE" 2>/dev/null | head -1 || true)
+  TZ=$(grep -oP 'TZ:\s*\K\S+' "$COMPOSE_FILE" 2>/dev/null | head -1 || true)
   TZ="${TZ:-Asia/Tokyo}"
   if [[ -n "$API_PORT" && -n "$WS_PORT" ]]; then
     echo "Re-rendering docker-compose template..."
@@ -117,3 +119,8 @@ if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
 else
   echo "Warning: container did not start. Check: openclaw-logs $N"
 fi
+
+# Re-grant host-user SFTP/WinSCP access: the update created root-owned
+# config backups and the recreated gateway writes fresh 0600 files, both
+# of which clamp the ACL mask until it is re-applied.
+command -v openclaw-perms >/dev/null 2>&1 && openclaw-perms "$N" >/dev/null 2>&1 || true

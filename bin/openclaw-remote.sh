@@ -58,6 +58,9 @@ ensure_container_ownership() {
   if command -v restorecon >/dev/null 2>&1; then
     sudo restorecon -R "$DATA_DIR" 2>/dev/null || true
   fi
+  # Re-grant host-user SFTP/WinSCP ACLs after the chown — gateway-written
+  # 0600 files clamp the ACL mask and block the host user until re-applied.
+  command -v openclaw-perms >/dev/null 2>&1 && openclaw-perms "$N" >/dev/null 2>&1 || true
 }
 
 # Resolve the gateway token.  The .env file's OPENCLAW_GATEWAY_TOKEN is the
@@ -434,7 +437,10 @@ setup_firewall() {
     fi
 
     if [[ "$input_policy" == "DROP" || "$has_block_rule" == true ]]; then
-      if ! sudo iptables -L INPUT -n 2>/dev/null | grep -q "tailscale0"; then
+      # 'iptables -C' checks for the exact rule; '-L' without '-v' never
+      # shows interfaces, so grepping it for tailscale0 can never match and
+      # every run would insert a duplicate rule.
+      if ! sudo iptables -C INPUT -i tailscale0 -j ACCEPT 2>/dev/null; then
         local block_line
         # Skip "Chain INPUT (policy DROP)" header — it matches DROP but isn't a rule line
         block_line=$(sudo iptables -L INPUT -n --line-numbers 2>/dev/null \
@@ -708,7 +714,7 @@ print_status() {
   fi
   if command -v iptables >/dev/null 2>&1; then
     local ts_rule="no"
-    if sudo iptables -L INPUT -n 2>/dev/null | grep -q "tailscale0" 2>/dev/null; then
+    if sudo iptables -C INPUT -i tailscale0 -j ACCEPT 2>/dev/null; then
       ts_rule="yes"
     fi
     echo "  iptables tailscale0   : $ts_rule"
