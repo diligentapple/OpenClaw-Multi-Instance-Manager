@@ -210,6 +210,26 @@ Each instance N gets deterministic ports:
 | `~/.openclawN/openclaw.json`  | Main configuration                         |
 | `~/.openclawN/workspace/`     | Working directory                          |
 
+## Direct file access (WinSCP / SFTP / VS Code Remote)
+
+The gateway inside the container runs as root and writes files into
+`~/.openclawN/` as `root:root` with mode `0600`, so an SFTP client logged in
+as your normal user can hit "access denied" on some files. Grant yourself
+persistent access with POSIX ACLs:
+
+```bash
+openclaw-perms 1               # fix instance 1 once
+openclaw-perms all             # fix all instances once
+openclaw-perms --install all   # recommended: keep access fresh via cron
+```
+
+`--install` adds a root cron job that re-applies the ACLs every minute. This
+is needed because the running gateway keeps creating new `0600` files, which
+clamp the ACL mask and block the inherited host-user entry until it is
+re-applied. The container itself is unaffected: the gateway keeps running as
+root (ACLs never restrict it), and uid 1000 stays the owner of all files, so
+OpenClaw works exactly as before.
+
 ## Command Reference
 
 | Command | Description |
@@ -222,6 +242,7 @@ Each instance N gets deterministic ports:
 | `openclaw-exec N [cmd...]` | Run command in container |
 | `openclawN [cmd...]` | Shortcut for openclaw-exec |
 | `openclaw-remote N` | Enable Tailscale remote access |
+| `openclaw-perms N\|all [--install]` | Grant direct SFTP/WinSCP access to data dirs |
 | `openclaw-logs N` | Follow container logs |
 | `openclaw-health N` | Health check |
 | `openclaw-list` | List all instances with ports |
