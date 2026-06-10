@@ -161,9 +161,17 @@ delete_instance() {
   echo "Deleted instance #$N"
 }
 
+# Guard each call: delete_instance returns 1 on incomplete cleanup, and an
+# unguarded nonzero status under 'set -e' would abort the loop, silently
+# skipping the remaining instances the user already confirmed.
+FAILED_INSTANCES=()
 for n in "${TARGETS[@]}"; do
-  delete_instance "$n"
+  delete_instance "$n" || FAILED_INSTANCES+=("$n")
 done
 
 echo ""
+if [[ ${#FAILED_INSTANCES[@]} -gt 0 ]]; then
+  echo "Done: $(( ${#TARGETS[@]} - ${#FAILED_INSTANCES[@]} )) instance(s) deleted, ${#FAILED_INSTANCES[@]} incomplete: ${FAILED_INSTANCES[*]}"
+  exit 1
+fi
 echo "Done: ${#TARGETS[@]} instance(s) deleted."

@@ -37,15 +37,24 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   exit 1
 fi
 
+# Allocate a TTY only when we actually have one — hardcoding -t breaks
+# non-interactive use (cron, pipes, ssh without -t) with "the input device
+# is not a TTY", and CRLF-corrupts redirected output. Keep -i always so
+# piped stdin still reaches the container.
+DOCKER_FLAGS=(-i)
+if [[ -t 0 && -t 1 ]]; then
+  DOCKER_FLAGS+=(-t)
+fi
+
 if [[ $# -eq 0 ]]; then
-  exec docker exec -it "$CONTAINER" bash
+  exec docker exec "${DOCKER_FLAGS[@]}" "$CONTAINER" bash
 else
   # If the first argument is a system binary (bash, node, cat, …)
   # run it directly.  Otherwise treat it as an OpenClaw CLI subcommand
   # and route through the app entrypoint.
   if docker exec "$CONTAINER" sh -c "command -v \"$1\"" >/dev/null 2>&1; then
-    exec docker exec -it "$CONTAINER" "$@"
+    exec docker exec "${DOCKER_FLAGS[@]}" "$CONTAINER" "$@"
   else
-    exec docker exec -it "$CONTAINER" node /app/openclaw.mjs "$@"
+    exec docker exec "${DOCKER_FLAGS[@]}" "$CONTAINER" node /app/openclaw.mjs "$@"
   fi
 fi

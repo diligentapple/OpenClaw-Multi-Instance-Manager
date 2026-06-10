@@ -52,14 +52,27 @@ sudo chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
 #   losing configuration.
 _is_stub=true
 if sudo test -f "$CONFIG"; then
-  _has_channels=$(sudo jq -r 'if (.channels // {} | length) > 0 then "yes" else "no" end' "$CONFIG" 2>/dev/null || echo "no")
-  _has_auth=$(sudo jq -r 'if ((.auth.profiles // {}) | length) > 0 then "yes" else "no" end' "$CONFIG" 2>/dev/null || echo "no")
-  if [[ "$_has_channels" == "yes" || "$_has_auth" == "yes" ]]; then
+  if ! command -v jq >/dev/null 2>&1; then
+    # Without jq we cannot tell a stub from a real config. Fail closed and
+    # keep the file — deleting a real config would lose channel tokens and
+    # API keys. (openclaw-remote auto-installs jq; install.sh does not.)
+    echo "Note: jq not found; keeping existing openclaw.json (cannot verify it is a stub)."
     _is_stub=false
+  else
+    _has_channels=$(sudo jq -r 'if (.channels // {} | length) > 0 then "yes" else "no" end' "$CONFIG" 2>/dev/null || echo "no")
+    _has_auth=$(sudo jq -r 'if ((.auth.profiles // {}) | length) > 0 then "yes" else "no" end' "$CONFIG" 2>/dev/null || echo "no")
+    if [[ "$_has_channels" == "yes" || "$_has_auth" == "yes" ]]; then
+      _is_stub=false
+    fi
   fi
 fi
 
 if [[ "$_is_stub" == "true" ]]; then
+  # Keep a backup even for stubs — the detection above can misfire on a
+  # corrupt or torn real config, and backing up a stub costs nothing.
+  if sudo test -f "$CONFIG"; then
+    sudo cp "$CONFIG" "${CONFIG}.bak" 2>/dev/null || true
+  fi
   sudo rm -f "$CONFIG"
 else
   echo "Existing config detected (has user settings). Wizard will re-pair without wiping configuration."
@@ -149,6 +162,11 @@ for i in $(seq 1 60); do
   fi
   sleep 2
 done
+
+# Re-grant host-user SFTP/WinSCP access: the wizard and gateway wrote new
+# 0600 files (openclaw.json, pairing state, sessions) whose clamped ACL
+# mask blocks the host user until re-applied.
+command -v openclaw-perms >/dev/null 2>&1 && openclaw-perms "$N" >/dev/null 2>&1 || true
 
 echo "Onboarding complete for instance #$N"
 echo "  Dashboard : http://127.0.0.1:${API_PORT}/"
